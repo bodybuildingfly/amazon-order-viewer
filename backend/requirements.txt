@@ -9,3 +9,4 @@ amazon-orders
 Flask-JWT-Extended
 Flask-Cors
 requests
+gunicorn

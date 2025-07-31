@@ -6,7 +6,7 @@ import logging
 import json
 from datetime import timedelta, date
 from functools import wraps
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request, Response, send_from_directory
 from flask_cors import CORS
 from psycopg2.errors import UniqueViolation
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -18,7 +18,8 @@ from amazonorders.transactions import AmazonTransactions
 import requests
 
 # --- Flask App Initialization ---
-app = Flask(__name__)
+# Point to the build folder for static files
+app = Flask(__name__, static_folder='../build', static_url_path='/')
 
 # --- Basic Logging Configuration ---
 logging.basicConfig(level=logging.INFO)
@@ -93,7 +94,7 @@ def summarize_title(title):
         app.logger.error("Ollama configuration is missing from environment variables.")
         return title
 
-    prompt = f"Summarize the following Amazon product title into a phrase of exactly 3, 4, or 5 words. Crucially, your output must contain no less than 3 words and no more than 5 words. Provide ONLY the summarized title. Do not include any extra text, punctuation, or formatting whatsoever (e.g., no quotation marks, no periods, no introductory phrases).\n'{title}'"
+    prompt = f"Summarize the following product title in 3 to 5 words: '{title}'. Do not provide any additional text other than the summarized product title."
     payload = { "model": model_name, "messages": [{"role": "user", "content": prompt}] }
     headers = { "Authorization": f"Bearer {api_key}", "Content-Type": "application/json" }
     
@@ -214,7 +215,7 @@ def get_orders_and_transactions():
                         summary = summarize_title(item.title)
                         order_data["items"].append({
                             "title": summary,
-                            "link": item.link,
+                            "link": f"https://www.amazon.com{item.link}" if item.link else None,
                             "price": f"${item.price:.2f}" if item.price is not None else None,
                             "subscription_discount": order_details.subscription_discount
                         })
@@ -417,6 +418,15 @@ def save_settings():
     except Exception:
         app.logger.exception("An unexpected error occurred in save_settings.")
         return jsonify({"error": "An unexpected server error occurred."}), 500
+
+# --- Serve React App ---
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    if path != "" and os.path.exists(app.static_folder + '/' + path):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)
