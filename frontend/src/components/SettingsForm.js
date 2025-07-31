@@ -14,11 +14,9 @@ function SettingsForm() {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const response = await fetch('http://localhost:5001/api/settings', {
+        const response = await fetch('/api/settings', {
           method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-          },
+          headers: { 'Authorization': `Bearer ${token}` },
         });
         const data = await response.json();
         if (response.ok) {
@@ -41,7 +39,7 @@ function SettingsForm() {
     setTestMessage('Testing...');
     setMessage('');
     try {
-      const response = await fetch('http://localhost:5001/api/test-credentials', {
+      const response = await fetch('/api/test-credentials', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -70,7 +68,7 @@ function SettingsForm() {
     setTestMessage('');
 
     try {
-      const response = await fetch('http://localhost:5001/api/settings', {
+      const response = await fetch('/api/settings', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

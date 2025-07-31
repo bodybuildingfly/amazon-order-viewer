@@ -25,9 +25,10 @@ function OrdersPage() {
     setIsLoading(true);
     setOrders([]);
     setStatusMessage('Connecting to the server...');
-    setProgress({ value: 0, max: 100 }); // Reset progress
+    setProgress({ value: 0, max: 100 });
 
-    const url = `http://localhost:5001/api/orders?days=${days}&token=${token}`;
+    // Use a relative path for the EventSource URL
+    const url = `/api/orders?days=${days}&token=${token}`;
     
     if (eventSourceRef.current) {
       eventSourceRef.current.close();

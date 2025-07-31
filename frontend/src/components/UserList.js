@@ -10,7 +10,7 @@ function UserList() {
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch('http://localhost:5001/api/admin/users', {
+      const response = await fetch('/api/admin/users', {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       const data = await response.json();
@@ -33,7 +33,7 @@ function UserList() {
     if (!newPassword) return;
 
     try {
-      const response = await fetch(`http://localhost:5001/api/admin/users/${userId}/password`, {
+      const response = await fetch(`/api/admin/users/${userId}/password`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -51,13 +51,12 @@ function UserList() {
   const handleDeleteUser = async (userId, username) => {
     if (window.confirm(`Are you sure you want to delete the user '${username}'?`)) {
       try {
-        const response = await fetch(`http://localhost:5001/api/admin/users/${userId}`, {
+        const response = await fetch(`/api/admin/users/${userId}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` },
         });
         const data = await response.json();
         setMessage(data.message || `Error: ${data.error}`);
-        // Refresh the user list after deletion
         fetchUsers();
       } catch (error) {
         setMessage('Error deleting user.');

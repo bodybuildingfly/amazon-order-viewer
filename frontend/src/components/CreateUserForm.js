@@ -15,7 +15,7 @@ function CreateUserForm() {
     setMessage('');
 
     try {
-      const response = await fetch('http://localhost:5001/api/admin/create-user', {
+      const response = await fetch('/api/admin/create-user', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -27,7 +27,6 @@ function CreateUserForm() {
       const data = await response.json();
       if (response.ok) {
         setMessage(data.message);
-        // Clear fields on success
         setUsername('');
         setPassword('');
       } else {
