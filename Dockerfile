@@ -1,41 +1,31 @@
 # Dockerfile
-# Multi-stage build for a lean and secure production image.
+# This production Dockerfile builds the application by cloning it from GitHub.
 
-# --- Stage 1: Build the React Frontend ---
-FROM node:20-alpine AS frontend-builder
+# --- Stage 1: Source Code Retrieval & Build ---
+# We use a full-featured image that includes git and build tools.
+FROM python:3.12-bookworm AS builder
 
-WORKDIR /app/frontend
-
-# Copy package files and install dependencies
-COPY frontend/package*.json ./
-RUN npm install
-
-# Copy the rest of the frontend source code
-COPY frontend/ ./
-
-# Build the static files
-RUN npm run build
-
-# --- Stage 2: Build the Python Backend ---
-FROM python:3.12-slim AS backend-builder
+# Install Node.js and npm
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm
 
 WORKDIR /app
 
-# Install system dependencies needed for Python packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libjpeg-dev \
-    zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Clone the repository from GitHub
+RUN git clone https://github.com/bodybuildingfly/amazon-order-viewer.git .
 
-# Copy requirements and install Python packages
-COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# --- Build Frontend ---
+WORKDIR /app/frontend
+RUN npm install
+RUN npm run build
 
-# Copy the backend source code
-COPY backend/ ./
+# --- Install Backend Dependencies ---
+WORKDIR /app/backend
+# Install dependencies into a temporary local folder for easy copying later
+RUN pip install --no-cache-dir --target=/app/wheels -r requirements.txt
 
-# --- Stage 3: Final Production Image ---
+
+# --- Stage 2: Final Production Image ---
+# Start from a minimal, secure Python image.
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -44,17 +34,17 @@ WORKDIR /app
 RUN useradd --create-home appuser
 USER appuser
 
-# Copy installed Python packages from the backend-builder stage
-COPY --from=backend-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-# Copy the backend application code
-COPY --from=backend-builder /app ./
+# Copy installed Python packages from the builder stage
+COPY --from=builder /app/wheels /usr/local/lib/python3.12/site-packages
 
-# Copy the built static frontend files from the frontend-builder stage
-COPY --from=frontend-builder /app/frontend/build ./build
+# Copy the backend application code
+COPY --from=builder /app/backend ./backend
+
+# Copy the built static frontend files
+COPY --from=builder /app/frontend/build ./build
 
 # Expose the port the app will run on
 EXPOSE 5001
 
-# Command to run the application using a production-grade server like Gunicorn
-# We will add Gunicorn to requirements.txt in the next step.
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "app:app"]
+# The command to run the application using a production-grade Gunicorn server
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "backend.app:app"]
