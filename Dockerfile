@@ -1,62 +1,60 @@
-# --- Stage 0: Source Cloner ---
-# Use a lightweight image that includes Git to clone the repository.
-# This stage's only purpose is to fetch the latest source code.
-FROM alpine/git AS source-cloner
-
-# Set a working directory inside this stage.
-WORKDIR /app
-
-# Add a build argument that can be changed to invalidate the Docker cache.
-# This ensures that a fresh 'git clone' is performed when needed.
-ARG CACHE_BUSTER=1
-
-# Clone the entire GitHub repository into the current working directory (/app).
-RUN git clone https://github.com/bodybuildingfly/trello-card-scheduler.git .
+# Dockerfile
+# Multi-stage build for a lean and secure production image.
 
 # --- Stage 1: Build the React Frontend ---
-# Use a Node.js image for building the React frontend.
-FROM node:18-alpine AS build-stage
+FROM node:20-alpine AS frontend-builder
 
-# Set the working directory for the frontend build.
 WORKDIR /app/frontend
 
-# Copy only the package files from the source-cloner stage first.
-# This leverages Docker's layer caching for faster subsequent builds if dependencies haven't changed.
-COPY --from=source-cloner /app/frontend/package*.json ./
+# Copy package files and install dependencies
+COPY frontend/package*.json ./
 RUN npm install
 
-# Copy the rest of the frontend source code from the cloner stage.
-COPY --from=source-cloner /app/frontend/ ./
+# Copy the rest of the frontend source code
+COPY frontend/ ./
 
-# Build the static files for production. The output will be in /app/frontend/build.
+# Build the static files
 RUN npm run build
 
+# --- Stage 2: Build the Python Backend ---
+FROM python:3.12-slim AS backend-builder
 
-# --- Stage 2: Create the Final Node.js Server Image ---
-# Start from a fresh, clean Node.js image for the final production environment.
-FROM node:18-alpine
-
-# Set the working directory for the final application.
 WORKDIR /app
 
-# Set the environment to production. This tells Express to run in an optimized mode.
-ENV NODE_ENV=production
+# Install system dependencies needed for Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libjpeg-dev \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy the backend's package files from the cloner stage.
-COPY --from=source-cloner /app/backend/package*.json ./backend/
+# Copy requirements and install Python packages
+COPY backend/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install only production dependencies to keep the final image small and secure.
-RUN npm install --prefix backend --production
+# Copy the backend source code
+COPY backend/ ./
 
-# Copy the rest of the backend source code from the cloner stage.
-COPY --from=source-cloner /app/backend/ ./backend/
+# --- Stage 3: Final Production Image ---
+FROM python:3.12-slim
 
-# Copy the built static files from the 'build-stage' into a 'build' folder
-# that the Express server will use to serve the frontend.
-COPY --from=build-stage /app/frontend/build ./build
+WORKDIR /app
 
-# The server will run on port 5000 inside the container.
-EXPOSE 5000
+# Create a non-root user for security
+RUN useradd --create-home appuser
+USER appuser
 
-# The command to start the Node.js server in production mode.
-CMD ["npm", "start", "--prefix", "backend"]
+# Copy installed Python packages from the backend-builder stage
+COPY --from=backend-builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+# Copy the backend application code
+COPY --from=backend-builder /app ./
+
+# Copy the built static frontend files from the frontend-builder stage
+COPY --from=frontend-builder /app/frontend/build ./build
+
+# Expose the port the app will run on
+EXPOSE 5001
+
+# Command to run the application using a production-grade server like Gunicorn
+# We will add Gunicorn to requirements.txt in the next step.
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "app:app"]
