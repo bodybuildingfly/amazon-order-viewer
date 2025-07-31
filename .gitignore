@@ -1,0 +1,27 @@
+# .gitignore
+
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+*.egg-info/
+
+# Node
+frontend/node_modules/
+frontend/build/
+.pnp.js
+.pnp.loader.mjs
+package-lock.json
+
+# Docker
+docker-compose.override.yml
+Dockerfile.dev
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,36 @@
+# docker-compose.yml
+# Defines the single container service for the application.
+
+services:
+  # The single application service running both frontend and backend
+  app:
+    container_name: amazon-order-viewer
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000" # For the React frontend
+      - "5001:5001" # For the Flask backend
+    volumes:
+      # Mounts the entire project directory for live code changes
+      - .:/app
+      # Anonymous volume to prevent local node_modules from overwriting the container's
+      - /app/frontend/node_modules
+    environment:
+      # Pass database credentials as separate, raw variables
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      # Pass Ollama variables
+      - OLLAMA_URL=${OLLAMA_URL}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
+      # Pass Admin credentials
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - FLASK_ENV=development
+      # Ensures React Dev Server works correctly inside Docker
+      - WDS_SOCKET_PORT=0
+      - WATCHPACK_POLLING=true

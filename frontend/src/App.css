@@ -1,0 +1,42 @@
+/* frontend/src/App.css */
+
+/* --- 1. Main Application Layout --- */
+/* We turn the.App container into a flex container that manages the page layout. */
+.App {
+  display: flex;
+  flex-direction: column; /* Stack children vertically (header, main) */
+  min-height: 100vh;     /* Ensure the app fills at least the full screen height */
+  text-align: center;
+}
+
+/* --- 2. Application Header --- */
+/* The header is now a simple block with a fixed height. */
+.App-header {
+  /* REMOVED: min-height: 100vh; This was the cause of the problem. */
+  height: 80px; /* A fixed, sensible height for the header */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(10px + 2vmin);
+  color: white;
+  background-color: #282c34;
+  flex-shrink: 0; /* Prevents the header from shrinking */
+}
+
+/* --- 3. Main Content Area --- */
+/* We select the <main> element directly. */
+main {
+  /* This is the key property that fixes the layout. */
+  /* It tells the main content area to grow and fill all available space. */
+  flex-grow: 1;
+  
+  /* Add some padding so content isn't stuck to the edges. */
+  padding: 20px;
+  background-color: #ffffff; /* A light background for the content area */
+  color: #282c34;
+}
+
+/* --- 4. Optional Link Styling --- */
+.App-link {
+  color: #61dafb;
+}

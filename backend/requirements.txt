@@ -1,0 +1,11 @@
+# backend/requirements.txt
+# Python dependencies for the Flask API
+
+flask
+python-dotenv
+psycopg2-binary
+cryptography
+amazon-orders
+Flask-JWT-Extended
+Flask-Cors
+requests

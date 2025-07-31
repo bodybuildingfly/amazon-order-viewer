@@ -1,0 +1,18 @@
+# .dockerignore
+# This file tells Docker which files and folders to ignore during the build process.
+
+# Ignore git history
+.git
+.gitignore
+
+# Ignore the .env file to prevent secrets from being built into the image
+.env
+
+# Ignore IDE and OS-specific files
+.vscode/
+.idea/
+.DS_Store
+
+# We explicitly DO NOT ignore the frontend/node_modules directory here,
+# because we want to allow the COPY --from=frontend-builder command to work correctly.
+# Docker will handle ignoring the host's node_modules via the volume mount.
