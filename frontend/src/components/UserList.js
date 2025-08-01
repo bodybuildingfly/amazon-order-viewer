@@ -1,16 +1,18 @@
 // frontend/src/components/UserList.js
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
+
+const API_URL = process.env.REACT_APP_API_BASE_URL || '';
 
 function UserList() {
   const [users, setUsers] = useState([]);
   const [message, setMessage] = useState('');
   const { token } = useAuth();
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
-      const response = await fetch('/api/admin/users', {
+      const response = await fetch(`${API_URL}/api/admin/users`, {
         headers: { 'Authorization': `Bearer ${token}` },
       });
       const data = await response.json();
@@ -22,18 +24,18 @@ function UserList() {
     } catch (error) {
       setMessage('Error fetching users.');
     }
-  };
+  }, [token]);
 
   useEffect(() => {
     fetchUsers();
-  }, [token]);
+  }, [fetchUsers]);
 
   const handlePasswordChange = async (userId) => {
     const newPassword = prompt('Enter the new password for this user:');
     if (!newPassword) return;
 
     try {
-      const response = await fetch(`/api/admin/users/${userId}/password`, {
+      const response = await fetch(`${API_URL}/api/admin/users/${userId}/password`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -51,7 +53,7 @@ function UserList() {
   const handleDeleteUser = async (userId, username) => {
     if (window.confirm(`Are you sure you want to delete the user '${username}'?`)) {
       try {
-        const response = await fetch(`/api/admin/users/${userId}`, {
+        const response = await fetch(`${API_URL}/api/admin/users/${userId}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` },
         });

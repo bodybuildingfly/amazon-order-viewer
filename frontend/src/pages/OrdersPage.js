@@ -4,6 +4,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import OrdersTable from '../components/OrdersTable';
 
+const API_URL = process.env.REACT_APP_API_BASE_URL || '';
+
 function OrdersPage() {
   const [orders, setOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -27,8 +29,7 @@ function OrdersPage() {
     setStatusMessage('Connecting to the server...');
     setProgress({ value: 0, max: 100 });
 
-    // Use a relative path for the EventSource URL
-    const url = `/api/orders?days=${days}&token=${token}`;
+    const url = `${API_URL}/api/orders?days=${days}&token=${token}`;
     
     if (eventSourceRef.current) {
       eventSourceRef.current.close();

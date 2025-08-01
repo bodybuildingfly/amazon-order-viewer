@@ -3,6 +3,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
+const API_URL = process.env.REACT_APP_API_BASE_URL || '';
+
 function CreateUserForm() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -15,7 +17,7 @@ function CreateUserForm() {
     setMessage('');
 
     try {
-      const response = await fetch('/api/admin/create-user', {
+      const response = await fetch(`${API_URL}/api/admin/create-user`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
