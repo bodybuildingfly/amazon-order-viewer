@@ -6,7 +6,7 @@ import logging
 import json
 from datetime import timedelta, date
 from functools import wraps
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request, Response, send_from_directory
 from flask_cors import CORS
 from psycopg2.errors import UniqueViolation
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -18,7 +18,8 @@ from amazonorders.transactions import AmazonTransactions
 import requests
 
 # --- Flask App Initialization ---
-app = Flask(__name__)
+# Point to the build folder for static files
+app = Flask(__name__, static_folder='../build', static_url_path='/')
 
 # --- Basic Logging Configuration ---
 logging.basicConfig(level=logging.INFO)
@@ -119,6 +120,7 @@ def init_db():
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(schema_sql)
+                # Create admin user if it doesn't exist
                 admin_user = os.environ.get("ADMIN_USERNAME", "admin")
                 admin_pass = os.environ.get("ADMIN_PASSWORD", "changeme")
                 
@@ -139,75 +141,7 @@ def init_db():
 with app.app_context():
     init_db()
 
-# --- Helper to get Amazon Session ---
-def get_amazon_session(user_id):
-    """Retrieves user credentials and returns an AmazonSession instance with a persistent session path."""
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT amazon_email, amazon_password_encrypted, amazon_otp_secret_key FROM user_settings WHERE user_id = %s",
-                (user_id,)
-            )
-            settings = cur.fetchone()
-    if not settings or not settings[0] or not settings[1]:
-        raise ValueError("Amazon credentials not configured.")
-    
-    amazon_email, encrypted_password, amazon_otp_secret_key = settings
-    decrypted_password = fernet.decrypt(bytes(encrypted_password)).decode()
-
-    session = AmazonSession(
-        username=amazon_email,
-        password=decrypted_password,
-        otp_secret_key=amazon_otp_secret_key
-    )
-    
-    # CORRECTED: Set the session_path attribute after initialization
-    session_path = f"/app/cookies/session-{user_id}.pickle"
-    os.makedirs(os.path.dirname(session_path), exist_ok=True)
-    session.session_path = session_path
-    
-    return session
-
 # --- API Endpoints ---
-
-@app.route("/api/amazon/login", methods=['POST'])
-@jwt_required()
-def amazon_login():
-    current_user_id = get_jwt_identity()
-    try:
-        session = get_amazon_session(current_user_id)
-        session.login()
-        return jsonify({"message": "Amazon login successful."}), 200
-    except Exception as e:
-        app.logger.exception("Amazon login failed.")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/amazon/logout", methods=['POST'])
-@jwt_required()
-def amazon_logout():
-    current_user_id = get_jwt_identity()
-    try:
-        session = get_amazon_session(current_user_id)
-        session.logout()
-        if session.session_path and os.path.exists(session.session_path):
-            os.remove(session.session_path)
-            app.logger.info(f"Deleted session file: {session.session_path}")
-        return jsonify({"message": "Amazon logout successful."}), 200
-    except Exception as e:
-        app.logger.exception("Amazon logout failed.")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/amazon/status", methods=['GET'])
-@jwt_required()
-def amazon_status():
-    current_user_id = get_jwt_identity()
-    try:
-        session = get_amazon_session(current_user_id)
-        return jsonify({"is_authenticated": session.is_authenticated}), 200
-    except Exception as e:
-        app.logger.exception("Amazon status check failed.")
-        return jsonify({"error": str(e)}), 500
-
 
 @app.route("/api/orders", methods=['GET'])
 @jwt_required()
@@ -217,18 +151,37 @@ def get_orders_and_transactions():
     days_to_fetch = request.args.get('days', default=7, type=int)
 
     def generate_events(user_id, days):
+        session = None
         
         def send_event(event_type, data):
             event_data = json.dumps({"type": event_type, "payload": data})
             yield f"data: {event_data}\n\n"
 
         try:
-            yield from send_event("status", "Initializing Amazon session...")
-            session = get_amazon_session(user_id)
+            yield from send_event("status", "Fetching your settings...")
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT amazon_email, amazon_password_encrypted, amazon_otp_secret_key FROM user_settings WHERE user_id = %s",
+                        (user_id,)
+                    )
+                    settings = cur.fetchone()
 
-            if not session.is_authenticated:
-                yield from send_event("error", "Not logged into Amazon. Please use the 'Login to Amazon' button first.")
+            if not settings or not settings[0] or not settings[1]:
+                yield from send_event("error", "Amazon credentials not configured.")
                 return
+
+            amazon_email, encrypted_password, amazon_otp_secret_key = settings
+            decrypted_password = fernet.decrypt(bytes(encrypted_password)).decode()
+
+            yield from send_event("status", f"Logging into Amazon for {amazon_email}...")
+            session = AmazonSession(
+                username=amazon_email,
+                password=decrypted_password,
+                otp_secret_key=amazon_otp_secret_key
+            )
+            session.login()
+            yield from send_event("status", "Amazon login successful.")
 
             amazon_orders = AmazonOrders(session)
             amazon_transactions = AmazonTransactions(session)
@@ -281,6 +234,10 @@ def get_orders_and_transactions():
             app.logger.exception("An error occurred while fetching Amazon data.")
             error_msg = str(e) if str(e) else "An unexpected error occurred. Check logs for details."
             yield from send_event("error", error_msg)
+        finally:
+            if session and session.is_authenticated:
+                app.logger.info("Logging out of Amazon session.")
+                session.logout()
 
     return Response(generate_events(current_user_id, days_to_fetch), mimetype='text/event-stream')
 
@@ -461,6 +418,15 @@ def save_settings():
     except Exception:
         app.logger.exception("An unexpected error occurred in save_settings.")
         return jsonify({"error": "An unexpected server error occurred."}), 500
+
+# --- Serve React App ---
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    if path != "" and os.path.exists(app.static_folder + '/' + path):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)

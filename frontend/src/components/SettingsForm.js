@@ -3,8 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-const API_URL = process.env.REACT_APP_API_BASE_URL || '';
-
 function SettingsForm() {
   const [amazonEmail, setAmazonEmail] = useState('');
   const [amazonPassword, setAmazonPassword] = useState('');
@@ -16,7 +14,7 @@ function SettingsForm() {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const response = await fetch(`${API_URL}/api/settings`, {
+        const response = await fetch('/api/settings', {
           method: 'GET',
           headers: { 'Authorization': `Bearer ${token}` },
         });
@@ -41,7 +39,7 @@ function SettingsForm() {
     setTestMessage('Testing...');
     setMessage('');
     try {
-      const response = await fetch(`${API_URL}/api/test-credentials`, {
+      const response = await fetch('/api/test-credentials', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -70,7 +68,7 @@ function SettingsForm() {
     setTestMessage('');
 
     try {
-      const response = await fetch(`${API_URL}/api/settings`, {
+      const response = await fetch('/api/settings', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
