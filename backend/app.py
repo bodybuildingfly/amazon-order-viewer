@@ -227,9 +227,13 @@ def get_orders_and_transactions():
 
                     for item in order_details.items:
                         summary = summarize_title(item.title)
+                        # This ensures we don't double-prepend if the library ever changes.
+                        full_link = item.link
+                        if full_link and not full_link.startswith('http'):
+                            full_link = f"https://www.amazon.com{full_link}"
                         order_data["items"].append({
                             "title": summary,
-                            "link": f"https://www.amazon.com{item.link}" if item.link else None,
+                            "link": full_link,
                             "price": f"${item.price:.2f}" if item.price is not None else None,
                             "subscription_discount": order_details.subscription_discount
                         })
