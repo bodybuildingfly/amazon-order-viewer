@@ -222,6 +222,7 @@ def get_orders_and_transactions():
                         "order_number": order_details.order_number,
                         "order_placed_date": order_details.order_placed_date.isoformat() if order_details.order_placed_date else None,
                         "grand_total": f"${order_details.grand_total:.2f}" if order_details.grand_total is not None else None,
+                        "subscription_discount": order_details.subscription_discount,
                         "items": []
                     }
 
@@ -234,8 +235,7 @@ def get_orders_and_transactions():
                         order_data["items"].append({
                             "title": summary,
                             "link": full_link,
-                            "price": f"${item.price:.2f}" if item.price is not None else None,
-                            "subscription_discount": order_details.subscription_discount
+                            "price": f"${item.price:.2f}" if item.price is not None else None
                         })
                     
                     combined_data.append(order_data)

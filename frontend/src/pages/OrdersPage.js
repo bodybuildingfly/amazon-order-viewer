@@ -1,6 +1,6 @@
 // frontend/src/pages/OrdersPage.js
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import OrdersTable from '../components/OrdersTable';
 
@@ -8,21 +8,19 @@ function OrdersPage() {
   const [orders, setOrders] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState(30);
   const [statusMessage, setStatusMessage] = useState('');
   const [progress, setProgress] = useState({ value: 0, max: 100 });
   const { token } = useAuth();
-
-  // State for the Amazon logout button message
+  
   const [logoutMessage, setLogoutMessage] = useState('');
   
   const eventSourceRef = useRef(null);
 
-  // Handler for the Amazon logout button
   const handleForceLogout = async () => {
     setLogoutMessage('Executing command...');
     try {
-      const response = await fetch('/api/amazon-logout', { // CHANGED: Use the new endpoint
+      const response = await fetch('/api/amazon-logout', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -40,20 +38,21 @@ function OrdersPage() {
     }
   };
 
-  const handleFetchOrders = () => {
+  const handleFetchOrders = useCallback((fetchDays) => {
     if (!token) {
       setError('You must be logged in to fetch orders.');
       return;
     }
     
+    const daysToFetch = fetchDays || days;
+
     setError('');
     setIsLoading(true);
     setOrders([]);
     setStatusMessage('Connecting to the server...');
     setProgress({ value: 0, max: 100 });
 
-    // Use a relative path for the EventSource URL
-    const url = `/api/orders?days=${days}&token=${token}`;
+    const url = `/api/orders?days=${daysToFetch}&token=${token}`;
     
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
@@ -102,7 +101,7 @@ function OrdersPage() {
       setIsLoading(false);
       eventSource.close();
     };
-  };
+  }, [token, days]);
   
   useEffect(() => {
     return () => {
@@ -111,22 +110,45 @@ function OrdersPage() {
       }
     };
   }, []);
+  
+  const handlePresetClick = (presetDays) => {
+    setDays(presetDays);
+    handleFetchOrders(presetDays);
+  };
 
   return (
     <div>
       <h2>Your Amazon Orders & Transactions</h2>
-      <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <label htmlFor="days-input">Fetch data for the last</label>
+      <div style={{ 
+        marginBottom: '20px', 
+        padding: '15px',
+        border: '1px solid #eee',
+        borderRadius: '8px',
+        display: 'flex', 
+        alignItems: 'center', 
+        gap: '15px',
+        justifyContent: 'center'
+      }}>
+        <span>Fetch orders from the last:</span>
+        <button onClick={() => handlePresetClick(30)} disabled={isLoading} style={{ padding: '8px 16px' }}>
+          30 Days
+        </button>
+        <button onClick={() => handlePresetClick(90)} disabled={isLoading} style={{ padding: '8px 16px' }}>
+          90 Days
+        </button>
+        <button onClick={() => handlePresetClick(365)} disabled={isLoading} style={{ padding: '8px 16px' }}>
+          Year
+        </button>
+        <div style={{borderLeft: '1px solid #ccc', height: '30px'}}></div>
         <input
-          id="days-input"
           type="number"
           value={days}
-          onChange={(e) => setDays(e.target.value)}
-          style={{ width: '80px', padding: '8px' }}
+          onChange={(e) => setDays(parseInt(e.target.value, 10))}
+          style={{ width: '80px', padding: '8px', textAlign: 'center' }}
         />
-        <label htmlFor="days-input">days</label>
-        <button onClick={handleFetchOrders} disabled={isLoading} style={{ padding: '8px 16px' }}>
-          {isLoading ? 'Loading...' : 'Load Orders'}
+        <span>days</span>
+        <button onClick={() => handleFetchOrders()} disabled={isLoading} style={{ padding: '8px 16px', fontWeight: 'bold' }}>
+          {isLoading ? 'Loading...' : 'Load'}
         </button>
       </div>
 
@@ -139,7 +161,7 @@ function OrdersPage() {
       
       {error && <p style={{ color: 'red' }}>Error: {error}</p>}
       {!isLoading && !error && <OrdersTable data={orders} />}
-      
+
       <hr style={{ margin: '40px 0' }}/>
       <div style={{ marginTop: '40px' }}>
         <h3>Session Tools</h3>

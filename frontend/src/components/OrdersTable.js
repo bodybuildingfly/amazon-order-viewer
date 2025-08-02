@@ -29,14 +29,29 @@ function OrdersTable({ data }) {
               padding: '15px',
               backgroundColor: '#f7f7f7',
               cursor: 'pointer',
-              display: 'flex', // Use Flexbox for even spacing
-              justifyContent: 'space-between', // Distribute items evenly
+              display: 'flex',
+              justifyContent: 'space-between',
               alignItems: 'center',
               borderBottom: expandedOrder === order.order_number ? '1px solid #ccc' : 'none'
             }}
           >
             <div>
               <strong>Order #:</strong> {order.order_number}
+              {/* Visual indicator for Subscribe & Save orders */}
+              {order.subscription_discount && (
+                <span style={{
+                  marginLeft: '10px',
+                  backgroundColor: '#17a2b8',
+                  color: 'white',
+                  padding: '3px 8px',
+                  borderRadius: '12px',
+                  fontSize: '0.8em',
+                  fontWeight: 'bold',
+                  verticalAlign: 'middle'
+                }}>
+                  S&S
+                </span>
+              )}
             </div>
             <div style={{ color: '#555' }}>
               <strong>Placed:</strong> {new Date(order.order_placed_date).toLocaleDateString()}
@@ -52,7 +67,7 @@ function OrdersTable({ data }) {
           {/* This is the collapsible content area with the items table */}
           {expandedOrder === order.order_number && (
             <div style={{ padding: '15px' }}>
-              {/* Subscribe & Save indicator for the whole order */}
+              {/* Display the full discount text when the order is expanded */}
               {order.subscription_discount && (
                 <div style={{ marginBottom: '10px' }}>
                   <span style={{
