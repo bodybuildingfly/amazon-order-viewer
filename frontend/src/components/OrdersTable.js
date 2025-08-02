@@ -78,7 +78,7 @@ function OrdersTable({ data }) {
                   {order.items.map((item, itemIndex) => (
                     <tr key={`${order.order_number}-${itemIndex}`} style={{ borderBottom: '1px solid #eee' }}>
                       <td style={{ padding: '10px', textAlign: 'left' }}>
-                        <a href={`https://www.amazon.com${item.link}`} target="_blank" rel="noopener noreferrer">
+                        <a href={item.link} target="_blank" rel="noopener noreferrer">
                           {item.title}
                         </a>
                       </td>
