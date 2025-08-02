@@ -30,6 +30,9 @@ services:
       # Pass Admin credentials
       - ADMIN_USERNAME=${ADMIN_USERNAME}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      # Pass the JWT secret key and encryption key
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - FLASK_ENV=development
       # Ensures React Dev Server works correctly inside Docker
       - WDS_SOCKET_PORT=0

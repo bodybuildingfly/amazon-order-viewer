@@ -37,8 +37,8 @@ USER appuser
 # Copy installed Python packages from the builder stage
 COPY --from=builder /app/wheels /usr/local/lib/python3.12/site-packages
 
-# Copy the backend application code
-COPY --from=builder /app/backend ./backend
+# CHANGED: Copy the contents of the backend folder directly into the app's root
+COPY --from=builder /app/backend .
 
 # Copy the built static frontend files
 COPY --from=builder /app/frontend/build ./build
@@ -47,4 +47,5 @@ COPY --from=builder /app/frontend/build ./build
 EXPOSE 5001
 
 # The command to run the application using a production-grade Gunicorn server
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "backend.app:app"]
+# CHANGED: The entry point is now just app:app
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "app:app"]

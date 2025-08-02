@@ -16,10 +16,12 @@ from amazonorders.session import AmazonSession
 from amazonorders.orders import AmazonOrders
 from amazonorders.transactions import AmazonTransactions
 import requests
+import hashlib
+import base64
 
 # --- Flask App Initialization ---
 # Point to the build folder for static files
-app = Flask(__name__, static_folder='../build', static_url_path='/')
+app = Flask(__name__, static_folder='build', static_url_path='/')
 
 # --- Basic Logging Configuration ---
 logging.basicConfig(level=logging.INFO)
@@ -32,16 +34,27 @@ CORS(
     allow_headers=["Authorization", "Content-Type"]
 )
 
+# Read keys from the environment variables
+jwt_secret_key = os.environ.get('JWT_SECRET_KEY')
+if not jwt_secret_key:
+    raise ValueError("No JWT_SECRET_KEY set for Flask application")
+encryption_passphrase = os.environ.get('ENCRYPTION_KEY')
+if not encryption_passphrase:
+    raise ValueError("No ENCRYPTION_KEY set for Flask application")
+
 # --- Configuration ---
-app.config["JWT_SECRET_KEY"] = "a-static-super-secret-key-for-dev"
+app.config["JWT_SECRET_KEY"] = jwt_secret_key
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
 app.config["JWT_TOKEN_LOCATION"] = ["headers", "query_string"]
 app.config["JWT_QUERY_STRING_NAME"] = "token"
-ENCRYPTION_KEY = "jA0Ea_z2g-c_3B-dE5fG6h_iJ7kL8m_N0oPqR2sT4uV="
 
 jwt = JWTManager(app)
-fernet = Fernet(ENCRYPTION_KEY.encode())
 
+# Use SHA-256 to hash the passphrase. This produces a 32-byte key.
+key_digest = hashlib.sha256(encryption_passphrase.encode('utf-8')).digest()
+# Fernet requires a URL-safe base64-encoded key.
+derived_key = base64.urlsafe_b64encode(key_digest)
+fernet = Fernet(derived_key)
 
 # --- Custom JWT Error Handlers ---
 @jwt.invalid_token_loader
@@ -239,8 +252,13 @@ def get_orders_and_transactions():
                 app.logger.info("Logging out of Amazon session.")
                 session.logout()
 
-    return Response(generate_events(current_user_id, days_to_fetch), mimetype='text/event-stream')
-
+    response = Response(generate_events(current_user_id, days_to_fetch), mimetype='text/event-stream')
+    response.headers['Content-Type'] = 'text/event-stream; charset=utf-8'
+    response.headers['Cache-Control'] = 'no-cache, no-transform'
+    response.headers['X-Accel-Buffering'] = 'no'
+    response.headers['Connection'] = 'keep-alive'
+    response.headers['Content-Encoding'] = 'none' # Prevents gzipping
+    return response
 
 @app.route("/api/login", methods=['POST'])
 def login_user():
