@@ -12,8 +12,33 @@ function OrdersPage() {
   const [statusMessage, setStatusMessage] = useState('');
   const [progress, setProgress] = useState({ value: 0, max: 100 });
   const { token } = useAuth();
+
+  // State for the Amazon logout button message
+  const [logoutMessage, setLogoutMessage] = useState('');
   
   const eventSourceRef = useRef(null);
+
+  // Handler for the Amazon logout button
+  const handleForceLogout = async () => {
+    setLogoutMessage('Executing command...');
+    try {
+      const response = await fetch('/api/amazon-logout', { // CHANGED: Use the new endpoint
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      const data = await response.json();
+      if (response.ok) {
+        const fullMessage = `${data.message}\n\nOutput:\n${data.output || 'No output.'}`;
+        setLogoutMessage(fullMessage);
+      } else {
+        setLogoutMessage(`Error: ${data.error}\n\nDetails:\n${data.details || 'N/A'}`);
+      }
+    } catch (error) {
+      setLogoutMessage('Failed to connect to the server.');
+    }
+  };
 
   const handleFetchOrders = () => {
     if (!token) {
@@ -114,6 +139,33 @@ function OrdersPage() {
       
       {error && <p style={{ color: 'red' }}>Error: {error}</p>}
       {!isLoading && !error && <OrdersTable data={orders} />}
+      
+      <hr style={{ margin: '40px 0' }}/>
+      <div style={{ marginTop: '40px' }}>
+        <h3>Session Tools</h3>
+        <div style={{ padding: '20px', border: '1px solid #eee', borderRadius: '8px', maxWidth: '600px', margin: 'auto' }}>
+          <p>If you are having trouble loading orders, you can force a logout of the Amazon session on the server. This will clear any saved cookies and require a fresh login on the next attempt.</p>
+          <button 
+            onClick={handleForceLogout} 
+            style={{ backgroundColor: '#6c757d', color: 'white', padding: '10px 15px', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+          >
+            Force Amazon Session Logout
+          </button>
+          {logoutMessage && (
+            <pre style={{ 
+              marginTop: '20px', 
+              whiteSpace: 'pre-wrap', 
+              backgroundColor: '#f8f9fa', 
+              border: '1px solid #dee2e6', 
+              padding: '15px', 
+              textAlign: 'left',
+              borderRadius: '4px'
+            }}>
+              {logoutMessage}
+            </pre>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

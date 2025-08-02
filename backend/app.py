@@ -18,6 +18,7 @@ from amazonorders.transactions import AmazonTransactions
 import requests
 import hashlib
 import base64
+import subprocess
 
 # --- Flask App Initialization ---
 # Point to the build folder for static files
@@ -435,6 +436,30 @@ def save_settings():
         return jsonify({"message": "Settings saved successfully."}), 200
     except Exception:
         app.logger.exception("An unexpected error occurred in save_settings.")
+        return jsonify({"error": "An unexpected server error occurred."}), 500
+    
+# Endpoint to force Amazon logout
+@app.route("/api/amazon-logout", methods=['POST'])
+@jwt_required() # CHANGED: Now accessible by any logged-in user
+def amazon_logout():
+    try:
+        command = ["amazon-orders", "logout"]
+        result = subprocess.run(
+            command, 
+            capture_output=True, 
+            text=True, 
+            check=True
+        )
+        app.logger.info(f"Successfully executed 'amazon-orders logout'. Output: {result.stdout}")
+        return jsonify({"message": "Amazon logout command executed successfully.", "output": result.stdout}), 200
+    except FileNotFoundError:
+        app.logger.error("'amazon-orders' command not found in container's PATH.")
+        return jsonify({"error": "'amazon-orders' command not found."}), 500
+    except subprocess.CalledProcessError as e:
+        app.logger.error(f"Error executing 'amazon-orders logout'. Stderr: {e.stderr}")
+        return jsonify({"error": "Command failed to execute.", "details": e.stderr}), 500
+    except Exception:
+        app.logger.exception("An unexpected error occurred during amazon_logout.")
         return jsonify({"error": "An unexpected server error occurred."}), 500
 
 # --- Serve React App ---
