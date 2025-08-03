@@ -1,7 +1,6 @@
 # backend/app.py
 
 import os
-import psycopg2
 import logging
 import json
 from datetime import timedelta, date
@@ -22,7 +21,7 @@ import subprocess
 from db import init_pool, get_db_cursor
 
 # --- Flask App Initialization ---
-app = Flask(__name__, static_folder='../build', static_url_path='/')
+app = Flask(__name__, static_folder='build', static_url_path='/')
 
 # --- Basic Logging Configuration ---
 logging.basicConfig(level=logging.INFO)
@@ -85,7 +84,6 @@ def admin_required():
 
 # --- AI Summarization Function (Bulk Version) ---
 def summarize_titles_bulk(titles):
-    # ... (This function is unchanged)
     if not titles:
         return {}
     ollama_url = os.environ.get("OLLAMA_URL")
