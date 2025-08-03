@@ -19,10 +19,10 @@ import requests
 import hashlib
 import base64
 import subprocess
+from db import init_pool, get_db_cursor
 
 # --- Flask App Initialization ---
-# Point to the build folder for static files
-app = Flask(__name__, static_folder='build', static_url_path='/')
+app = Flask(__name__, static_folder='../build', static_url_path='/')
 
 # --- Basic Logging Configuration ---
 logging.basicConfig(level=logging.INFO)
@@ -35,27 +35,26 @@ CORS(
     allow_headers=["Authorization", "Content-Type"]
 )
 
-# Read keys from the environment variables
+# --- Configuration ---
 jwt_secret_key = os.environ.get('JWT_SECRET_KEY')
 if not jwt_secret_key:
     raise ValueError("No JWT_SECRET_KEY set for Flask application")
-encryption_passphrase = os.environ.get('ENCRYPTION_KEY')
-if not encryption_passphrase:
-    raise ValueError("No ENCRYPTION_KEY set for Flask application")
 
-# --- Configuration ---
 app.config["JWT_SECRET_KEY"] = jwt_secret_key
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
 app.config["JWT_TOKEN_LOCATION"] = ["headers", "query_string"]
 app.config["JWT_QUERY_STRING_NAME"] = "token"
-
 jwt = JWTManager(app)
 
-# Use SHA-256 to hash the passphrase. This produces a 32-byte key.
+# --- Fernet Encryption Key Setup ---
+encryption_passphrase = os.environ.get('ENCRYPTION_KEY')
+if not encryption_passphrase:
+    raise ValueError("No ENCRYPTION_KEY set for Flask application")
+
 key_digest = hashlib.sha256(encryption_passphrase.encode('utf-8')).digest()
-# Fernet requires a URL-safe base64-encoded key.
 derived_key = base64.urlsafe_b64encode(key_digest)
 fernet = Fernet(derived_key)
+
 
 # --- Custom JWT Error Handlers ---
 @jwt.invalid_token_loader
@@ -84,45 +83,60 @@ def admin_required():
         return decorator
     return wrapper
 
-# --- Database Connection Helper ---
-def get_db_connection():
-    conn = psycopg2.connect(
-        dbname=os.environ.get('POSTGRES_DB'),
-        user=os.environ.get('POSTGRES_USER'),
-        password=os.environ.get('POSTGRES_PASSWORD'),
-        host=os.environ.get('POSTGRES_HOST'),
-        port=os.environ.get('POSTGRES_PORT')
-    )
-    return conn
-
-# --- AI Summarization Function ---
-def summarize_title(title):
-    if not isinstance(title, str) or not title.strip():
-        return ""
-    
+# --- AI Summarization Function (Bulk Version) ---
+def summarize_titles_bulk(titles):
+    # ... (This function is unchanged)
+    if not titles:
+        return {}
     ollama_url = os.environ.get("OLLAMA_URL")
     api_key = os.environ.get("OLLAMA_API_KEY")
     model_name = os.environ.get("OLLAMA_MODEL")
-
     if not all([ollama_url, api_key, model_name]):
         app.logger.error("Ollama configuration is missing from environment variables.")
-        return title
+        return {}
+    titles_json_string = json.dumps(titles, indent=2)
+    prompt = f"""
+    Your task is to summarize product titles into a concise, 3-5 word summary.
+    Focus on the main product name and brand.
+    You MUST ignore supplemental information like sizes, quantities, colors, and marketing phrases (e.g., "Supports Overall Wellbeing", "Dietary Supplement").
 
-    prompt = f"Summarize the following product title in 3 to 5 words: '{title}'. Do not provide any additional text other than the summarized product title."
-    payload = { "model": model_name, "messages": [{"role": "user", "content": prompt}] }
-    headers = { "Authorization": f"Bearer {api_key}", "Content-Type": "application/json" }
-    
+    Return the output as a single, valid JSON object that maps each original title to its summarized version.
+    Do not provide any additional text or explanation outside of the JSON object itself.
+
+    Example Input:
+    [
+      "Nature's Answer Alcohol-Free Cleavers Herb, 1-Fluid Ounce | Supports Overall Wellbeing | Dietary Supplement",
+      "Another Item Name, 24 Ounce, Red Color"
+    ]
+
+    Example Output:
+    {{
+      "Nature's Answer Alcohol-Free Cleavers Herb, 1-Fluid Ounce | Supports Overall Wellbeing | Dietary Supplement": "Nature's Answer Cleavers Herb",
+      "Another Item Name, 24 Ounce, Red Color": "Red Item 24 Ounce"
+    }}
+
+    Here are the titles to summarize:
+    {titles_json_string}
+    """
+    payload = {"model": model_name, "messages": [{"role": "user", "content": prompt}]}
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     try:
         response = requests.post(ollama_url, json=payload, headers=headers)
-        response.raise_for_status() 
+        response.raise_for_status()
         response_data = response.json()
-        summary = ""
         if response_data.get("choices") and len(response_data["choices"]) > 0:
-            summary = response_data["choices"][0].get("message", {}).get("content", "").strip()
-        return summary if summary else title
+            content = response_data["choices"][0].get("message", {}).get("content", "").strip()
+            if '```json' in content:
+                content = content.split('```json')[1].split('```')[0].strip()
+            summaries_map = json.loads(content)
+            return summaries_map
+        return {}
+    except json.JSONDecodeError:
+        app.logger.exception("Failed to decode JSON from AI response.")
+        return {}
     except Exception:
-        app.logger.exception("An error occurred during title summarization.")
-        return title
+        app.logger.exception("An error occurred during bulk title summarization.")
+        return {}
 
 # --- Database Initialization Logic ---
 def init_db():
@@ -131,28 +145,26 @@ def init_db():
     try:
         with open(schema_path, 'r') as f:
             schema_sql = f.read()
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(schema_sql)
-                # Create admin user if it doesn't exist
-                admin_user = os.environ.get("ADMIN_USERNAME", "admin")
-                admin_pass = os.environ.get("ADMIN_PASSWORD", "changeme")
-                
-                cur.execute("SELECT id FROM users WHERE username = %s", (admin_user,))
-                if cur.fetchone() is None:
-                    app.logger.info(f"Creating admin user: {admin_user}")
-                    hashed_password = generate_password_hash(admin_pass)
-                    cur.execute(
-                        "INSERT INTO users (username, hashed_password, role) VALUES (%s, %s, 'admin')",
-                        (admin_user, hashed_password)
-                    )
-                    app.logger.info("Admin user created successfully.")
+        with get_db_cursor(commit=True) as cur:
+            cur.execute(schema_sql)
+            admin_user = os.environ.get("ADMIN_USERNAME", "admin")
+            admin_pass = os.environ.get("ADMIN_PASSWORD", "changeme")
+            
+            cur.execute("SELECT id FROM users WHERE username = %s", (admin_user,))
+            if cur.fetchone() is None:
+                app.logger.info(f"Creating admin user: {admin_user}")
+                hashed_password = generate_password_hash(admin_pass)
+                cur.execute(
+                    "INSERT INTO users (username, hashed_password, role) VALUES (%s, %s, 'admin')",
+                    (admin_user, hashed_password)
+                )
+                app.logger.info("Admin user created successfully.")
         app.logger.info("Database schema check/initialization complete.")
     except Exception:
         app.logger.exception("An error occurred during DB initialization.")
 
-# --- Initialize DB on Startup ---
 with app.app_context():
+    init_pool()
     init_db()
 
 # --- API Endpoints ---
@@ -173,13 +185,12 @@ def get_orders_and_transactions():
 
         try:
             yield from send_event("status", "Fetching your settings...")
-            with get_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT amazon_email, amazon_password_encrypted, amazon_otp_secret_key FROM user_settings WHERE user_id = %s",
-                        (user_id,)
-                    )
-                    settings = cur.fetchone()
+            with get_db_cursor() as cur:
+                cur.execute(
+                    "SELECT amazon_email, amazon_password_encrypted, amazon_otp_secret_key FROM user_settings WHERE user_id = %s",
+                    (user_id,)
+                )
+                settings = cur.fetchone()
 
             if not settings or not settings[0] or not settings[1]:
                 yield from send_event("error", "Amazon credentials not configured.")
@@ -206,41 +217,65 @@ def get_orders_and_transactions():
             order_numbers = {trans.order_number for trans in transactions if trans.order_number}
             total_orders = len(order_numbers)
             
-            yield from send_event("progress_max", total_orders)
+            yield from send_event("progress_max", total_orders + 1)
             yield from send_event("status", f"Found {total_orders} unique orders to process.")
 
+            all_order_details = []
+            all_titles_to_summarize = []
             processed_orders = 0
-            combined_data = []
             for order_num in order_numbers:
                 processed_orders += 1
-                yield from send_event("status", f"Processing order {processed_orders} of {total_orders} ({order_num})...")
-                
+                yield from send_event("status", f"Fetching details for order {processed_orders} of {total_orders}...")
                 order_details = amazon_orders.get_order(order_id=order_num)
-                
-                if order_details and order_details.items:
+                if order_details:
+                    all_order_details.append(order_details)
+                    if order_details.items:
+                        for item in order_details.items:
+                            all_titles_to_summarize.append(item.title)
+                yield from send_event("progress_update", processed_orders)
+
+            yield from send_event("status", f"Summarizing {len(all_titles_to_summarize)} item titles...")
+            summaries_map = summarize_titles_bulk(all_titles_to_summarize)
+            
+            yield from send_event("progress_update", total_orders + 1)
+            yield from send_event("status", "Finalizing order data...")
+
+            combined_data = []
+            for order_details in all_order_details:
+                if order_details.items:
+                    
+                    discount_text = None
+                    if order_details.subscription_discount is not None:
+                        try:
+                            discount_amount = float(order_details.subscription_discount)
+                            discount_text = f"Subscribe & Save discount: ${discount_amount:.2f}"
+                        except (ValueError, TypeError):
+                            discount_text = order_details.subscription_discount
+
                     order_data = {
                         "order_number": order_details.order_number,
                         "order_placed_date": order_details.order_placed_date.isoformat() if order_details.order_placed_date else None,
                         "grand_total": f"${order_details.grand_total:.2f}" if order_details.grand_total is not None else None,
-                        "subscription_discount": order_details.subscription_discount,
+                        "subscription_discount": discount_text,
+                        "recipient": order_details.recipient.name if order_details.recipient else None,
                         "items": []
                     }
 
                     for item in order_details.items:
-                        summary = summarize_title(item.title)
-                        # This ensures we don't double-prepend if the library ever changes.
+                        summary = summaries_map.get(item.title, item.title)
+                        
                         full_link = item.link
                         if full_link and not full_link.startswith('http'):
-                            full_link = f"https://www.amazon.com{full_link}"
+                            full_link = f"[https://www.amazon.com](https://www.amazon.com){full_link}"
+                        
                         order_data["items"].append({
                             "title": summary,
                             "link": full_link,
-                            "price": f"${item.price:.2f}" if item.price is not None else None
+                            "price": f"${item.price:.2f}" if item.price is not None else None,
+                            "quantity": item.quantity if item.quantity is not None else 1
                         })
                     
                     combined_data.append(order_data)
-                
-                yield from send_event("progress_update", processed_orders)
             
             app.logger.info("Sorting orders by date...")
             combined_data.sort(key=lambda x: x.get('order_placed_date'), reverse=True)
@@ -262,7 +297,7 @@ def get_orders_and_transactions():
     response.headers['Cache-Control'] = 'no-cache, no-transform'
     response.headers['X-Accel-Buffering'] = 'no'
     response.headers['Connection'] = 'keep-alive'
-    response.headers['Content-Encoding'] = 'none' # Prevents gzipping
+    response.headers['Content-Encoding'] = 'none'
     return response
 
 @app.route("/api/login", methods=['POST'])
@@ -273,12 +308,9 @@ def login_user():
         password = data.get('password')
         if not username or not password:
             return jsonify({"error": "Username and password are required."}), 400
-
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id, hashed_password, role FROM users WHERE username = %s", (username,))
-                user_record = cur.fetchone()
-
+        with get_db_cursor() as cur:
+            cur.execute("SELECT id, hashed_password, role FROM users WHERE username = %s", (username,))
+            user_record = cur.fetchone()
         if user_record and check_password_hash(user_record[1], password):
             user_id = str(user_record[0])
             user_role = user_record[2]
@@ -297,10 +329,9 @@ def login_user():
 @admin_required()
 def get_users():
     try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id, username, role FROM users ORDER BY username")
-                users = [{"id": row[0], "username": row[1], "role": row[2]} for row in cur.fetchall()]
+        with get_db_cursor() as cur:
+            cur.execute("SELECT id, username, role FROM users ORDER BY username")
+            users = [{"id": row[0], "username": row[1], "role": row[2]} for row in cur.fetchall()]
         return jsonify(users), 200
     except Exception:
         app.logger.exception("Failed to fetch users.")
@@ -316,9 +347,8 @@ def update_user_password(user_id):
             return jsonify({"error": "New password is required."}), 400
         
         hashed_password = generate_password_hash(new_password)
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE users SET hashed_password = %s WHERE id = %s", (hashed_password, str(user_id)))
+        with get_db_cursor(commit=True) as cur:
+            cur.execute("UPDATE users SET hashed_password = %s WHERE id = %s", (hashed_password, str(user_id)))
         return jsonify({"message": "Password updated successfully."}), 200
     except Exception:
         app.logger.exception("Failed to update password.")
@@ -332,9 +362,8 @@ def delete_user(user_id):
         if str(user_id) == current_user_id:
             return jsonify({"error": "You cannot delete your own account."}), 403
 
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM users WHERE id = %s", (str(user_id),))
+        with get_db_cursor(commit=True) as cur:
+            cur.execute("DELETE FROM users WHERE id = %s", (str(user_id),))
         return jsonify({"message": "User deleted successfully."}), 200
     except Exception:
         app.logger.exception("Failed to delete user.")
@@ -353,9 +382,8 @@ def create_user():
             return jsonify({"error": "Username and password are required."}), 400
 
         hashed_password = generate_password_hash(password)
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("INSERT INTO users (username, hashed_password, role) VALUES (%s, %s, %s)", (username, hashed_password, role))
+        with get_db_cursor(commit=True) as cur:
+            cur.execute("INSERT INTO users (username, hashed_password, role) VALUES (%s, %s, %s)", (username, hashed_password, role))
         return jsonify({"message": f"User '{username}' created successfully."}), 201
     except UniqueViolation:
         return jsonify({"error": "Username already taken."}), 409
@@ -363,7 +391,29 @@ def create_user():
         app.logger.exception("An unexpected error occurred during user creation.")
         return jsonify({"error": "An unexpected server error occurred."}), 500
 
-# This endpoint is no longer protected by JWT
+@app.route("/api/amazon-logout", methods=['POST'])
+@jwt_required()
+def amazon_logout():
+    try:
+        command = ["amazon-orders", "logout"]
+        result = subprocess.run(
+            command, 
+            capture_output=True, 
+            text=True, 
+            check=True
+        )
+        app.logger.info(f"Successfully executed 'amazon-orders logout'. Output: {result.stdout}")
+        return jsonify({"message": "Amazon logout command executed successfully.", "output": result.stdout}), 200
+    except FileNotFoundError:
+        app.logger.error("'amazon-orders' command not found in container's PATH.")
+        return jsonify({"error": "'amazon-orders' command not found."}), 500
+    except subprocess.CalledProcessError as e:
+        app.logger.error(f"Error executing 'amazon-orders logout'. Stderr: {e.stderr}")
+        return jsonify({"error": "Command failed to execute.", "details": e.stderr}), 500
+    except Exception:
+        app.logger.exception("An unexpected error occurred during amazon_logout.")
+        return jsonify({"error": "An unexpected server error occurred."}), 500
+
 @app.route("/api/test-credentials", methods=['POST'])
 def test_credentials():
     try:
@@ -395,10 +445,9 @@ def test_credentials():
 def get_settings():
     try:
         current_user_id = get_jwt_identity()
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT amazon_email, amazon_otp_secret_key FROM user_settings WHERE user_id = %s", (current_user_id,))
-                settings = cur.fetchone()
+        with get_db_cursor() as cur:
+            cur.execute("SELECT amazon_email, amazon_otp_secret_key FROM user_settings WHERE user_id = %s", (current_user_id,))
+            settings = cur.fetchone()
         if settings:
             return jsonify({
                 "amazon_email": settings[0] or '',
@@ -425,52 +474,27 @@ def save_settings():
 
         encrypted_password = fernet.encrypt(amazon_password.encode())
         
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO user_settings (user_id, amazon_email, amazon_password_encrypted, amazon_otp_secret_key)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (user_id) DO UPDATE SET
-                        amazon_email = EXCLUDED.amazon_email,
-                        amazon_password_encrypted = EXCLUDED.amazon_password_encrypted,
-                        amazon_otp_secret_key = EXCLUDED.amazon_otp_secret_key,
-                        updated_at = CURRENT_TIMESTAMP;
-                """, (current_user_id, amazon_email, encrypted_password, amazon_otp_secret_key))
+        with get_db_cursor(commit=True) as cur:
+            cur.execute("""
+                INSERT INTO user_settings (user_id, amazon_email, amazon_password_encrypted, amazon_otp_secret_key)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    amazon_email = EXCLUDED.amazon_email,
+                    amazon_password_encrypted = EXCLUDED.amazon_password_encrypted,
+                    amazon_otp_secret_key = EXCLUDED.amazon_otp_secret_key,
+                    updated_at = CURRENT_TIMESTAMP;
+            """, (current_user_id, amazon_email, encrypted_password, amazon_otp_secret_key))
 
         return jsonify({"message": "Settings saved successfully."}), 200
     except Exception:
         app.logger.exception("An unexpected error occurred in save_settings.")
-        return jsonify({"error": "An unexpected server error occurred."}), 500
-    
-# Endpoint to force Amazon logout
-@app.route("/api/amazon-logout", methods=['POST'])
-@jwt_required() # CHANGED: Now accessible by any logged-in user
-def amazon_logout():
-    try:
-        command = ["amazon-orders", "logout"]
-        result = subprocess.run(
-            command, 
-            capture_output=True, 
-            text=True, 
-            check=True
-        )
-        app.logger.info(f"Successfully executed 'amazon-orders logout'. Output: {result.stdout}")
-        return jsonify({"message": "Amazon logout command executed successfully.", "output": result.stdout}), 200
-    except FileNotFoundError:
-        app.logger.error("'amazon-orders' command not found in container's PATH.")
-        return jsonify({"error": "'amazon-orders' command not found."}), 500
-    except subprocess.CalledProcessError as e:
-        app.logger.error(f"Error executing 'amazon-orders logout'. Stderr: {e.stderr}")
-        return jsonify({"error": "Command failed to execute.", "details": e.stderr}), 500
-    except Exception:
-        app.logger.exception("An unexpected error occurred during amazon_logout.")
         return jsonify({"error": "An unexpected server error occurred."}), 500
 
 # --- Serve React App ---
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
-    if path != "" and os.path.exists(app.static_folder + '/' + path):
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
     else:
         return send_from_directory(app.static_folder, 'index.html')

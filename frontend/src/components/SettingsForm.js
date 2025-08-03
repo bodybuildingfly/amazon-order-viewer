@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../utils/api';
 
 function SettingsForm() {
   const [amazonEmail, setAmazonEmail] = useState('');
@@ -13,50 +14,29 @@ function SettingsForm() {
 
   useEffect(() => {
     const fetchSettings = async () => {
+      if (!token) return;
       try {
-        const response = await fetch('/api/settings', {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
-        const data = await response.json();
-        if (response.ok) {
-          setAmazonEmail(data.amazon_email);
-          setAmazonOtpSecretKey(data.amazon_otp_secret_key);
-        } else {
-          setMessage(`Error loading settings: ${data.error} - ${data.message || ''}`);
-        }
+        const data = await api.get('/api/settings', token);
+        setAmazonEmail(data.amazon_email);
+        setAmazonOtpSecretKey(data.amazon_otp_secret_key);
       } catch (error) {
-        setMessage(`Error: ${error.message}`);
+        setMessage(`Error loading settings: ${error.message}`);
       }
     };
 
-    if (token) {
-      fetchSettings();
-    }
+    fetchSettings();
   }, [token]);
 
   const handleTestCredentials = async () => {
     setTestMessage('Testing...');
     setMessage('');
     try {
-      const response = await fetch('/api/test-credentials', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          amazon_email: amazonEmail,
-          amazon_password: amazonPassword,
-          amazon_otp_secret_key: amazonOtpSecretKey
-        }),
+      const data = await api.post('/api/test-credentials', {
+        amazon_email: amazonEmail,
+        amazon_password: amazonPassword,
+        amazon_otp_secret_key: amazonOtpSecretKey
       });
-      const data = await response.json();
-      if (response.ok) {
-        setTestMessage(data.message);
-      } else {
-        setTestMessage(`Error: ${data.error}`);
-      }
+      setTestMessage(data.message);
     } catch (error) {
       setTestMessage(`Error: ${error.message}`);
     }
@@ -68,47 +48,35 @@ function SettingsForm() {
     setTestMessage('');
 
     try {
-      const response = await fetch('/api/settings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          amazon_email: amazonEmail,
-          amazon_password: amazonPassword,
-          amazon_otp_secret_key: amazonOtpSecretKey
-        }),
-      });
+      const data = await api.post('/api/settings', {
+        amazon_email: amazonEmail,
+        amazon_password: amazonPassword,
+        amazon_otp_secret_key: amazonOtpSecretKey
+      }, token);
 
-      const data = await response.json();
-      if (response.ok) {
-        setMessage(data.message);
-        setAmazonPassword('');
-      } else {
-        setMessage(`Error: ${data.error}`);
-      }
+      setMessage(data.message);
+      setAmazonPassword('');
     } catch (error) {
       setMessage(`Error: ${error.message}`);
     }
   };
 
   return (
-    <div style={{ maxWidth: '500px', margin: '20px auto', padding: '20px', border: '1px solid #ccc', borderRadius: '8px' }}>
+    <div className="form-container">
       <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '15px' }}>
-          <label htmlFor="amazonEmail" style={{ display: 'block', marginBottom: '5px' }}>Amazon Email:</label>
+        <div className="form-group">
+          <label htmlFor="amazonEmail" className="form-label">Amazon Email:</label>
           <input
             type="email"
             id="amazonEmail"
             value={amazonEmail}
             onChange={(e) => setAmazonEmail(e.target.value)}
             required
-            style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+            className="form-input"
           />
         </div>
-        <div style={{ marginBottom: '15px' }}>
-          <label htmlFor="amazonPassword" style={{ display: 'block', marginBottom: '5px' }}>Amazon Password:</label>
+        <div className="form-group">
+          <label htmlFor="amazonPassword" className="form-label">Amazon Password:</label>
           <input
             type="password"
             id="amazonPassword"
@@ -116,31 +84,39 @@ function SettingsForm() {
             onChange={(e) => setAmazonPassword(e.target.value)}
             placeholder="Enter password to test or update"
             required
-            style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+            className="form-input"
           />
         </div>
-        <div style={{ marginBottom: '15px' }}>
-          <label htmlFor="amazonOtpSecretKey" style={{ display: 'block', marginBottom: '5px' }}>2FA Key (Optional):</label>
+        <div className="form-group">
+          <label htmlFor="amazonOtpSecretKey" className="form-label">2FA Key (Optional):</label>
           <input
             type="text"
             id="amazonOtpSecretKey"
             value={amazonOtpSecretKey}
             onChange={(e) => setAmazonOtpSecretKey(e.target.value)}
             placeholder="For accounts with 2-Factor Authentication"
-            style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+            className="form-input"
           />
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button type="button" onClick={handleTestCredentials} style={{ flexGrow: 1, padding: '10px', backgroundColor: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+        <div className="btn-group">
+          <button type="button" onClick={handleTestCredentials} className="btn btn-secondary">
             Test Credentials
           </button>
-          <button type="submit" style={{ flexGrow: 2, padding: '10px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+          <button type="submit" className="btn btn-primary">
             Save Settings
           </button>
         </div>
       </form>
-      {testMessage && <p style={{ marginTop: '20px', color: testMessage.startsWith('Error:') ? 'red' : 'green' }}>{testMessage}</p>}
-      {message && <p style={{ marginTop: '20px', color: message.startsWith('Error:') ? 'red' : 'green' }}>{message}</p>}
+      {testMessage && (
+        <p className={`form-message ${testMessage.startsWith('Error:') ? 'error' : 'success'}`}>
+          {testMessage}
+        </p>
+      )}
+      {message && (
+        <p className={`form-message ${message.startsWith('Error:') ? 'error' : 'success'}`}>
+          {message}
+        </p>
+      )}
     </div>
   );
 }

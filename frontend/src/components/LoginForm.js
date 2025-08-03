@@ -1,13 +1,13 @@
 // frontend/src/components/LoginForm.js
 
 import React, { useState } from 'react';
-import { useAuth } from '../context/AuthContext'; // Import our custom auth hook
+import { useAuth } from '../context/AuthContext';
 
 function LoginForm() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
-  const { login } = useAuth(); // Get the login function from our context
+  const { login } = useAuth();
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -17,42 +17,46 @@ function LoginForm() {
 
     if (result.success) {
       setMessage('Login successful!');
-      // In a real app, you would redirect the user here, e.g., navigate('/dashboard')
+      // In a real app, you would redirect the user here.
     } else {
       setMessage(`Error: ${result.error}`);
     }
   };
 
   return (
-    <div style={{ maxWidth: '400px', margin: '20px auto', padding: '20px', border: '1px solid #ccc', borderRadius: '8px' }}>
+    <div className="form-container">
       <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '15px' }}>
-          <label htmlFor="username" style={{ display: 'block', marginBottom: '5px' }}>Username:</label>
+        <div className="form-group">
+          <label htmlFor="username" className="form-label">Username:</label>
           <input
             type="text"
             id="username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
-            style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+            className="form-input"
           />
         </div>
-        <div style={{ marginBottom: '15px' }}>
-          <label htmlFor="password" style={{ display: 'block', marginBottom: '5px' }}>Password:</label>
+        <div className="form-group">
+          <label htmlFor="password" className="form-label">Password:</label>
           <input
             type="password"
             id="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+            className="form-input"
           />
         </div>
-        <button type="submit" style={{ width: '100%', padding: '10px', backgroundColor: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+        <button type="submit" className="btn btn-success">
           Login
         </button>
       </form>
-      {message && <p style={{ marginTop: '20px', color: message.startsWith('Error:') ? 'red' : 'green' }}>{message}</p>}
+      {message && (
+        <p className={`form-message ${message.startsWith('Error:') ? 'error' : 'success'}`}>
+          {message}
+        </p>
+      )}
     </div>
   );
 }

@@ -5,23 +5,26 @@ import { Routes, Route, Link } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import SettingsPage from './pages/SettingsPage';
 import OrdersPage from './pages/OrdersPage';
-import AdminPage from './pages/AdminPage'; // Import the new Admin Page
+import AdminPage from './pages/AdminPage';
 import ProtectedRoute from './components/ProtectedRoute';
-import AdminRoute from './components/AdminRoute'; // Import the new AdminRoute
+import AdminRoute from './components/AdminRoute';
 import { useAuth } from './context/AuthContext';
 import './App.css';
+import './components/shared.css';
 
 // A simple navigation component
 const Navbar = () => {
   const { isLoggedIn, isAdmin, logout } = useAuth();
   return (
-    <nav style={{ padding: '10px', borderBottom: '1px solid #ccc', marginBottom: '20px' }}>
-      <Link to="/" style={{ marginRight: '15px' }}>Home</Link>
-      {isLoggedIn && <Link to="/orders" style={{ marginRight: '15px' }}>Orders</Link>}
-      {isLoggedIn && <Link to="/settings" style={{ marginRight: '15px' }}>Settings</Link>}
-      {isAdmin && <Link to="/admin" style={{ marginRight: '15px' }}>Admin</Link>}
-      {!isLoggedIn && <Link to="/login" style={{ marginRight: '15px' }}>Login</Link>}
-      {isLoggedIn && <button onClick={logout}>Logout</button>}
+    <nav className="navbar">
+      <div className="nav-links">
+        <Link to="/">Home</Link>
+        {isLoggedIn && <Link to="/orders">Orders</Link>}
+        {isLoggedIn && <Link to="/settings">Settings</Link>}
+        {isAdmin && <Link to="/admin">Admin</Link>}
+        {!isLoggedIn && <Link to="/login">Login</Link>}
+        {isLoggedIn && <button onClick={logout} className="logout-button">Logout</button>}
+      </div>
     </nav>
   );
 };
@@ -38,7 +41,7 @@ function App() {
       <main>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          
+
           <Route 
             path="/settings" 
             element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} 
@@ -49,7 +52,6 @@ function App() {
             element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} 
           />
           
-          {/* This is our new admin-only route */}
           <Route 
             path="/admin" 
             element={<AdminRoute><AdminPage /></AdminRoute>} 

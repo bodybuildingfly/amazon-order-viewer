@@ -1,42 +1,92 @@
 /* frontend/src/App.css */
 
-/* --- 1. Main Application Layout --- */
-/* We turn the.App container into a flex container that manages the page layout. */
+/* --- Global Styles & Variables --- */
+:root {
+  --primary-color: #007bff;
+  --dark-color: #282c34;
+  --light-gray: #f8f9fa;
+  --border-color: #dee2e6;
+  --text-color: #212529;
+  --background-color: #ffffff;
+}
+
+body {
+  background-color: var(--light-gray);
+  color: var(--text-color);
+}
+
+/* --- Main Application Layout --- */
 .App {
   display: flex;
-  flex-direction: column; /* Stack children vertically (header, main) */
-  min-height: 100vh;     /* Ensure the app fills at least the full screen height */
+  flex-direction: column;
+  min-height: 100vh;
   text-align: center;
 }
 
-/* --- 2. Application Header --- */
-/* The header is now a simple block with a fixed height. */
+/* --- Application Header --- */
 .App-header {
-  /* REMOVED: min-height: 100vh; This was the cause of the problem. */
-  height: 80px; /* A fixed, sensible height for the header */
+  background-color: var(--dark-color);
+  color: white;
+  padding: 20px;
+  flex-shrink: 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.App-header h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+/* --- Navigation Bar --- */
+.navbar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 15px 20px;
+  background-color: var(--background-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.nav-links {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
+  gap: 25px;
+}
+
+.nav-links a {
+  text-decoration: none;
+  color: var(--primary-color);
+  font-weight: 500;
+  font-size: 1rem;
+  transition: color 0.2s;
+}
+
+.nav-links a:hover {
+  color: var(--dark-color);
+}
+
+.logout-button {
+  background-color: transparent;
+  border: 1px solid var(--primary-color);
+  color: var(--primary-color);
+  padding: 8px 15px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.logout-button:hover {
+  background-color: var(--primary-color);
   color: white;
-  background-color: #282c34;
-  flex-shrink: 0; /* Prevents the header from shrinking */
 }
 
-/* --- 3. Main Content Area --- */
-/* We select the <main> element directly. */
+/* --- Main Content Area --- */
 main {
-  /* This is the key property that fixes the layout. */
-  /* It tells the main content area to grow and fill all available space. */
   flex-grow: 1;
-  
-  /* Add some padding so content isn't stuck to the edges. */
   padding: 20px;
-  background-color: #ffffff; /* A light background for the content area */
-  color: #282c34;
-}
-
-/* --- 4. Optional Link Styling --- */
-.App-link {
-  color: #61dafb;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  box-sizing: border-box;
 }

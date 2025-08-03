@@ -2,6 +2,8 @@
 
 import React, { createContext, useState, useContext } from 'react';
 import { jwtDecode } from 'jwt-decode';
+// ADDED: Import the new api service
+import { api } from '../utils/api';
 
 const AuthContext = createContext(null);
 
@@ -20,29 +22,22 @@ export const AuthProvider = ({ children }) => {
     return null;
   });
 
+  // CHANGED: Refactored the login function to use the new api service
   const login = async (username, password) => {
     try {
-      // Use a relative path for the API call
-      const response = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        const receivedToken = data.access_token;
-        setToken(receivedToken);
-        localStorage.setItem('authToken', receivedToken);
-        const decoded = jwtDecode(receivedToken);
-        setUserRole(decoded.role);
-        return { success: true };
-      } else {
-        return { success: false, error: data.error };
-      }
+      const data = await api.post('/api/login', { username, password });
+      
+      const receivedToken = data.access_token;
+      setToken(receivedToken);
+      localStorage.setItem('authToken', receivedToken);
+      
+      const decoded = jwtDecode(receivedToken);
+      setUserRole(decoded.role);
+      
+      return { success: true };
     } catch (error) {
-      return { success: false, error: 'Could not connect to the server.' };
+      // The api service now throws an error with the message from the backend
+      return { success: false, error: error.message };
     }
   };
 

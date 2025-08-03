@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../utils/api';
 
 function CreateUserForm() {
   const [username, setUsername] = useState('');
@@ -15,63 +16,57 @@ function CreateUserForm() {
     setMessage('');
 
     try {
-      const response = await fetch('/api/admin/create-user', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ username, password, role }),
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        setMessage(data.message);
-        setUsername('');
-        setPassword('');
-      } else {
-        setMessage(`Error: ${data.error}`);
-      }
+      const data = await api.post('/api/admin/create-user', { username, password, role }, token);
+      setMessage(data.message);
+      setUsername('');
+      setPassword('');
+      setRole('user');
     } catch (error) {
-      setMessage('An error occurred while connecting to the server.');
+      setMessage(`Error: ${error.message}`);
     }
   };
 
   return (
-    <div style={{ maxWidth: '500px', margin: '20px auto', padding: '20px', border: '1px solid #ccc', borderRadius: '8px' }}>
+    <div className="form-container">
       <form onSubmit={handleSubmit}>
-        <div style={{ marginBottom: '15px' }}>
-          <label>Username:</label>
+        <div className="form-group">
+          <label htmlFor="create-username" className="form-label">Username:</label>
           <input
             type="text"
+            id="create-username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
-            style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+            className="form-input"
           />
         </div>
-        <div style={{ marginBottom: '15px' }}>
-          <label>Password:</label>
+        <div className="form-group">
+          <label htmlFor="create-password" className="form-label">Password:</label>
           <input
             type="password"
+            id="create-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+            className="form-input"
           />
         </div>
-        <div style={{ marginBottom: '15px' }}>
-          <label>Role:</label>
-          <select value={role} onChange={(e) => setRole(e.target.value)} style={{ width: '100%', padding: '8px' }}>
+        <div className="form-group">
+          <label htmlFor="create-role" className="form-label">Role:</label>
+          <select id="create-role" value={role} onChange={(e) => setRole(e.target.value)} className="form-select">
             <option value="user">User</option>
             <option value="admin">Admin</option>
           </select>
         </div>
-        <button type="submit" style={{ width: '100%', padding: '10px', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px' }}>
+        <button type="submit" className="btn btn-primary">
           Create User
         </button>
       </form>
-      {message && <p style={{ marginTop: '20px', color: message.startsWith('Error:') ? 'red' : 'green' }}>{message}</p>}
+      {message && (
+        <p className={`form-message ${message.startsWith('Error:') ? 'error' : 'success'}`}>
+          {message}
+        </p>
+      )}
     </div>
   );
 }
