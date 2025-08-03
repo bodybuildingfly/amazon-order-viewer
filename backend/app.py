@@ -54,7 +54,6 @@ key_digest = hashlib.sha256(encryption_passphrase.encode('utf-8')).digest()
 derived_key = base64.urlsafe_b64encode(key_digest)
 fernet = Fernet(derived_key)
 
-
 # --- Custom JWT Error Handlers ---
 @jwt.invalid_token_loader
 def invalid_token_callback(error):
@@ -84,48 +83,74 @@ def admin_required():
 
 # --- AI Summarization Function (Bulk Version) ---
 def summarize_titles_bulk(titles):
+    """
+    Summarizes a list of product titles in a single bulk request to the AI model.
+    Returns a dictionary mapping original titles to their summaries.
+    """
     if not titles:
         return {}
+
     ollama_url = os.environ.get("OLLAMA_URL")
     api_key = os.environ.get("OLLAMA_API_KEY")
     model_name = os.environ.get("OLLAMA_MODEL")
+
     if not all([ollama_url, api_key, model_name]):
         app.logger.error("Ollama configuration is missing from environment variables.")
         return {}
+
     titles_json_string = json.dumps(titles, indent=2)
+
     prompt = f"""
-    Your task is to summarize product titles into a concise, 3-5 word summary.
-    Focus on the main product name and brand.
-    You MUST ignore supplemental information like sizes, quantities, colors, and marketing phrases (e.g., "Supports Overall Wellbeing", "Dietary Supplement").
+    You are an expert product catalog summarizer. Your goal is to create a very short, human-readable summary for each product title, strictly between 3 and 5 words.
 
-    Return the output as a single, valid JSON object that maps each original title to its summarized version.
-    Do not provide any additional text or explanation outside of the JSON object itself.
+    Follow these rules precisely:
+    1.  **Identify the Core Product**: Find the primary subject of the title (e.g., "Deodorant", "Cleavers Herb", "Coffee Pods").
+    2.  **Identify the Brand**: Find the brand name (e.g., "Oars + Alps", "Nature's Answer", "Starbucks").
+    3.  **Combine and Refine**: Combine the brand and product into a natural-sounding phrase. You can add a key attribute if necessary (e.g., "Unscented", "Dark Roast").
+    4.  **Strictly Exclude**: You MUST remove all of the following:
+        -   Sizes, weights, volumes (e.g., "2.6 Oz", "1-Fluid Ounce", "Large")
+        -   Counts, packs (e.g., "3 Pack", "12-count")
+        -   Marketing claims (e.g., "Dermatologist Tested", "Made with Clean Ingredients", "Supports Overall Wellbeing")
+        -   Superfluous descriptors (e.g., "for Men and Women", "Alcohol-Free")
+        -   Format types (e.g., "Travel Size", "Variety")
 
-    Example Input:
+    Your final output must be a single, valid JSON object that maps each original title to its summarized version. Do not include any text, markdown, or explanations outside of the JSON object.
+
+    ---
+    **Examples**
+
+    **Input:**
     [
+      "Oars + Alps Aluminum Free Deodorant for Men and Women, Dermatologist Tested and Made with Clean Ingredients, Travel Size, Variety, 3 Pack, 2.6 Oz Each",
       "Nature's Answer Alcohol-Free Cleavers Herb, 1-Fluid Ounce | Supports Overall Wellbeing | Dietary Supplement",
-      "Another Item Name, 24 Ounce, Red Color"
+      "Starbucks K-Cup Coffee Pods—Dark Roast Coffee—Sumatra—100% Arabica—1 box (32 pods)"
     ]
 
-    Example Output:
+    **Output:**
     {{
+      "Oars + Alps Aluminum Free Deodorant for Men and Women, Dermatologist Tested and Made with Clean Ingredients, Travel Size, Variety, 3 Pack, 2.6 Oz Each": "Oars + Alps Deodorant",
       "Nature's Answer Alcohol-Free Cleavers Herb, 1-Fluid Ounce | Supports Overall Wellbeing | Dietary Supplement": "Nature's Answer Cleavers Herb",
-      "Another Item Name, 24 Ounce, Red Color": "Red Item 24 Ounce"
+      "Starbucks K-Cup Coffee Pods—Dark Roast Coffee—Sumatra—100% Arabica—1 box (32 pods)": "Starbucks Sumatra K-Cup Pods"
     }}
+    ---
 
-    Here are the titles to summarize:
+    **Titles to Summarize:**
     {titles_json_string}
     """
+
     payload = {"model": model_name, "messages": [{"role": "user", "content": prompt}]}
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    
     try:
         response = requests.post(ollama_url, json=payload, headers=headers)
         response.raise_for_status()
         response_data = response.json()
+        
         if response_data.get("choices") and len(response_data["choices"]) > 0:
             content = response_data["choices"][0].get("message", {}).get("content", "").strip()
             if '```json' in content:
                 content = content.split('```json')[1].split('```')[0].strip()
+            
             summaries_map = json.loads(content)
             return summaries_map
         return {}
