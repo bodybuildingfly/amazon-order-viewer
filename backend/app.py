@@ -94,7 +94,7 @@ def summarize_titles_bulk(titles):
     api_key = os.environ.get("OLLAMA_API_KEY")
     model_name = os.environ.get("OLLAMA_MODEL")
 
-    if not all([ollama_url, api_key, model_name]):
+    if not all([ollama_url, model_name]):
         app.logger.error("Ollama configuration is missing from environment variables.")
         return {}
 
@@ -138,16 +138,18 @@ def summarize_titles_bulk(titles):
     {titles_json_string}
     """
 
-    payload = {"model": model_name, "messages": [{"role": "user", "content": prompt}]}
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    
+    payload = {"model": model_name, "messages": [{"role": "user", "content": prompt}], "stream": False}
+    headers = { "Authorization": f"Bearer {api_key}", "Content-Type": "application/json" } if api_key else {}
+
+    app.logger.exception("Starting Ollama summarization")
+
     try:
         response = requests.post(ollama_url, json=payload, headers=headers)
         response.raise_for_status()
         response_data = response.json()
         
-        if response_data.get("choices") and len(response_data["choices"]) > 0:
-            content = response_data["choices"][0].get("message", {}).get("content", "").strip()
+        if response_data.get("message"):
+            content = response_data.get("message", {}).get("content", "").strip()
             if '```json' in content:
                 content = content.split('```json')[1].split('```')[0].strip()
             
