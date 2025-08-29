@@ -82,86 +82,130 @@ def admin_required():
     return wrapper
 
 # --- AI Summarization Function (Bulk Version) ---
-def summarize_titles_bulk(titles):
+def summarize_titles_bulk(titles, progress_start=0, progress_end=1):
     """
-    Summarizes a list of product titles in a single bulk request to the AI model.
+    Summarizes a list of product titles in batches, yielding progress events.
     Returns a dictionary mapping original titles to their summaries.
     """
     if not titles:
         return {}
 
+    # Use dict.fromkeys to get unique titles while preserving order
+    unique_titles = list(dict.fromkeys(titles))
+    
     ollama_url = os.environ.get("OLLAMA_URL")
     api_key = os.environ.get("OLLAMA_API_KEY")
     model_name = os.environ.get("OLLAMA_MODEL")
 
     if not all([ollama_url, model_name]):
         app.logger.error("Ollama configuration is missing from environment variables.")
+        yield "error", "Ollama summarization service is not configured on the server."
         return {}
 
-    titles_json_string = json.dumps(titles, indent=2)
+    if "localhost" in ollama_url or "127.0.0.1" in ollama_url:
+        app.logger.warning(
+            "OLLAMA_URL is set to a loopback address. This will not work inside a Docker container. "
+            "If running Docker on Mac/Windows, use 'host.docker.internal'. On Linux, use your host's IP address."
+        )
 
-    prompt = f"""
-    You are an expert product catalog summarizer. Your goal is to create a very short, human-readable summary for each product title, strictly between 3 and 5 words.
+    all_summaries = {}
+    batch_size = 10
+    num_batches = (len(unique_titles) + batch_size - 1) // batch_size
+    progress_range = progress_end - progress_start
 
-    Follow these rules precisely:
-    1.  **Identify the Core Product**: Find the primary subject of the title (e.g., "Deodorant", "Cleavers Herb", "Coffee Pods").
-    2.  **Identify the Brand**: Find the brand name (e.g., "Oars + Alps", "Nature's Answer", "Starbucks").
-    3.  **Combine and Refine**: Combine the brand and product into a natural-sounding phrase. You can add a key attribute if necessary (e.g., "Unscented", "Dark Roast").
-    4.  **Strictly Exclude**: You MUST remove all of the following:
-        -   Sizes, weights, volumes (e.g., "2.6 Oz", "1-Fluid Ounce", "Large")
-        -   Counts, packs (e.g., "3 Pack", "12-count")
-        -   Marketing claims (e.g., "Dermatologist Tested", "Made with Clean Ingredients", "Supports Overall Wellbeing")
-        -   Superfluous descriptors (e.g., "for Men and Women", "Alcohol-Free")
-        -   Format types (e.g., "Travel Size", "Variety")
+    yield "status", f"Summarizing {len(unique_titles)} titles..."
 
-    Your final output must be a single, valid JSON object that maps each original title to its summarized version. Do not include any text, markdown, or explanations outside of the JSON object.
+    for i in range(num_batches):
+        batch_start_index = i * batch_size
+        batch_end_index = batch_start_index + batch_size
+        batch_titles = unique_titles[batch_start_index:batch_end_index]
 
-    ---
-    **Examples**
+        yield "sub_status", f"(Batch {i + 1} of {num_batches})"
 
-    **Input:**
-    [
-      "Oars + Alps Aluminum Free Deodorant for Men and Women, Dermatologist Tested and Made with Clean Ingredients, Travel Size, Variety, 3 Pack, 2.6 Oz Each",
-      "Nature's Answer Alcohol-Free Cleavers Herb, 1-Fluid Ounce | Supports Overall Wellbeing | Dietary Supplement",
-      "Starbucks K-Cup Coffee Pods—Dark Roast Coffee—Sumatra—100% Arabica—1 box (32 pods)"
-    ]
+        titles_json_string = json.dumps(batch_titles, indent=2)
 
-    **Output:**
-    {{
-      "Oars + Alps Aluminum Free Deodorant for Men and Women, Dermatologist Tested and Made with Clean Ingredients, Travel Size, Variety, 3 Pack, 2.6 Oz Each": "Oars + Alps Deodorant",
-      "Nature's Answer Alcohol-Free Cleavers Herb, 1-Fluid Ounce | Supports Overall Wellbeing | Dietary Supplement": "Nature's Answer Cleavers Herb",
-      "Starbucks K-Cup Coffee Pods—Dark Roast Coffee—Sumatra—100% Arabica—1 box (32 pods)": "Starbucks Sumatra K-Cup Pods"
-    }}
-    ---
+        prompt = f"""
+        You are an expert product catalog summarizer. Your goal is to create a very short, human-readable summary for each product title provided in the input list. The summary must be strictly between 3 and 5 words.
 
-    **Titles to Summarize:**
-    {titles_json_string}
-    """
+        **CRITICAL INSTRUCTIONS:**
+        1.  Your output MUST be a single, valid JSON object.
+        2.  The JSON object must have a key for EVERY product title from the input list.
+        3.  The value for each key must be the new, summarized title.
 
-    payload = {"model": model_name, "messages": [{"role": "user", "content": prompt}], "stream": False}
-    headers = { "Authorization": f"Bearer {api_key}", "Content-Type": "application/json" } if api_key else {}
+        **SUMMARIZATION RULES:**
+        1.  **Identify Core Product & Brand**: Find the brand (e.g., "Elmer's") and the main product (e.g., "Craft Glue").
+        2.  **Combine and Refine**: Combine them into a natural phrase (e.g., "Elmer's Craft Glue"). Add a key attribute if necessary (e.g., "Clear").
+        3.  **Strictly Exclude**: You MUST remove all of the following:
+            -   Sizes, weights, volumes (e.g., "4 oz", "1 Gallon")
+            -   Counts, packs (e.g., "2-pack")
+            -   Marketing claims (e.g., "Helps Moisture Soften and Nourish")
+            -   Model numbers or identifiers (e.g., "E431")
+            -   Superfluous descriptors (e.g., "for School Supplies")
 
-    app.logger.exception("Starting Ollama summarization")
+        ---
+        **Examples**
 
-    try:
-        response = requests.post(ollama_url, json=payload, headers=headers)
-        response.raise_for_status()
-        response_data = response.json()
-        
-        if response_data.get("message"):
-            content = response_data.get("message", {}).get("content", "").strip()
-            if '```json' in content:
-                content = content.split('```json')[1].split('```')[0].strip()
+        **Input:**
+        [
+          "Oars + Alps Aluminum Free Deodorant for Men and Women, Dermatologist Tested and Made with Clean Ingredients, Travel Size, Variety, 3 Pack, 2.6 Oz Each",
+          "Elmer's E431 Craft Bond Fabric and Paper Glue, 4 oz, Clear"
+        ]
+
+        **Output:**
+        {{
+          "Oars + Alps Aluminum Free Deodorant for Men and Women, Dermatologist Tested and Made with Clean Ingredients, Travel Size, Variety, 3 Pack, 2.6 Oz Each": "Oars + Alps Deodorant",
+          "Elmer's E431 Craft Bond Fabric and Paper Glue, 4 oz, Clear": "Elmer's Clear Craft Glue"
+        }}
+        ---
+
+        **Titles to Summarize:**
+        {titles_json_string}
+        """
+
+        payload = {
+            "model": model_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "format": "json"
+        }
+        headers = { "Authorization": f"Bearer {api_key}", "Content-Type": "application/json" } if api_key else {}
+
+        app.logger.info(f"Starting Ollama summarization for batch {i+1}/{num_batches} to {ollama_url}...")
+
+        try:
+            response = requests.post(ollama_url, json=payload, headers=headers, timeout=60)
+            response.raise_for_status()
+            response_data = response.json()
             
-            summaries_map = json.loads(content)
-            return summaries_map
-        return {}
-    except json.JSONDecodeError:
-        app.logger.exception("Failed to decode JSON from AI response.")
-        return {}
-    except Exception:
-        app.logger.exception("An error occurred during bulk title summarization.")
-        return {}
+            if response_data.get("message"):
+                # With format: "json", the content should be a valid JSON string already.
+                content = response_data.get("message", {}).get("content", "")
+                batch_summaries = json.loads(content)
+                all_summaries.update(batch_summaries)
+            
+        except requests.exceptions.Timeout:
+            app.logger.error(f"Connection to Ollama timed out for batch {i+1}.")
+            yield "error", f"AI summarization timed out on batch {i+1}. Some titles may not be summarized."
+            continue
+        except requests.exceptions.ConnectionError as e:
+            app.logger.error(f"Could not connect to Ollama for batch {i+1}: {e}")
+            yield "error", "Could not connect to the AI summarization service."
+            return all_summaries
+        except json.JSONDecodeError:
+            app.logger.exception(f"Failed to decode JSON from AI response for batch {i+1}.")
+            yield "error", f"AI service returned an invalid response for batch {i+1}."
+            continue
+        except Exception:
+            app.logger.exception(f"An unexpected error occurred during summarization for batch {i+1}.")
+            yield "error", "An unexpected error occurred during summarization."
+            continue
+        
+        progress_fraction = (i + 1) / num_batches
+        current_progress = progress_start + (progress_fraction * progress_range)
+        yield "progress_update", current_progress
+
+    yield "sub_status", "" # Clear the sub-status when done
+    return all_summaries
 
 # --- Database Initialization Logic ---
 def init_db():
@@ -200,8 +244,9 @@ def get_orders_and_transactions():
     
     current_user_id = get_jwt_identity()
     days_to_fetch = request.args.get('days', default=7, type=int)
+    should_summarize = request.args.get('summarize', 'true', type=str).lower() == 'true'
 
-    def generate_events(user_id, days):
+    def generate_events(user_id, days, summarize):
         session = None
         
         def send_event(event_type, data):
@@ -242,7 +287,8 @@ def get_orders_and_transactions():
             order_numbers = {trans.order_number for trans in transactions if trans.order_number}
             total_orders = len(order_numbers)
             
-            yield from send_event("progress_max", total_orders + 1)
+            progress_max = total_orders + 1 if summarize else total_orders
+            yield from send_event("progress_max", progress_max)
             yield from send_event("status", f"Found {total_orders} unique orders to process.")
 
             all_order_details = []
@@ -259,10 +305,26 @@ def get_orders_and_transactions():
                             all_titles_to_summarize.append(item.title)
                 yield from send_event("progress_update", processed_orders)
 
-            yield from send_event("status", f"Summarizing {len(all_titles_to_summarize)} item titles...")
-            summaries_map = summarize_titles_bulk(all_titles_to_summarize)
+            summaries_map = {}
+            if summarize:
+                summarizer = summarize_titles_bulk(
+                    titles=all_titles_to_summarize,
+                    progress_start=processed_orders,
+                    progress_end=progress_max
+                )
+                while True:
+                    try:
+                        event_type, data = next(summarizer)
+                        yield from send_event(event_type, data)
+                    except StopIteration as e:
+                        summaries_map = e.value
+                        break
+            else:
+                yield from send_event("status", "Skipping title summarization.")
+                # Ensure the progress bar completes if we skip summarization
+                if progress_max > processed_orders:
+                    yield from send_event("progress_update", progress_max)
             
-            yield from send_event("progress_update", total_orders + 1)
             yield from send_event("status", "Finalizing order data...")
 
             combined_data = []
@@ -317,7 +379,7 @@ def get_orders_and_transactions():
                 app.logger.info("Logging out of Amazon session.")
                 session.logout()
 
-    response = Response(generate_events(current_user_id, days_to_fetch), mimetype='text/event-stream')
+    response = Response(generate_events(current_user_id, days_to_fetch, should_summarize), mimetype='text/event-stream')
     response.headers['Content-Type'] = 'text/event-stream; charset=utf-8'
     response.headers['Cache-Control'] = 'no-cache, no-transform'
     response.headers['X-Accel-Buffering'] = 'no'
