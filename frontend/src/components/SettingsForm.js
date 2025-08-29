@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../utils/api';
 
 function SettingsForm() {
   const [amazonEmail, setAmazonEmail] = useState('');
@@ -10,7 +9,7 @@ function SettingsForm() {
   const [amazonOtpSecretKey, setAmazonOtpSecretKey] = useState('');
   const [message, setMessage] = useState('');
   const [testMessage, setTestMessage] = useState('');
-  const { token } = useAuth();
+  const { token, api } = useAuth();
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -25,7 +24,7 @@ function SettingsForm() {
     };
 
     fetchSettings();
-  }, [token]);
+  }, [token, api]);
 
   const handleTestCredentials = async () => {
     setTestMessage('Testing...');

@@ -1,9 +1,8 @@
 // frontend/src/context/AuthContext.js
 
-import React, { createContext, useState, useContext } from 'react';
+import React, { createContext, useState, useContext, useMemo, useCallback } from 'react';
 import { jwtDecode } from 'jwt-decode';
-// ADDED: Import the new api service
-import { api } from '../utils/api';
+import ApiService from '../utils/api'; // Import the new ApiService class
 
 const AuthContext = createContext(null);
 
@@ -16,15 +15,27 @@ export const AuthProvider = ({ children }) => {
         const decoded = jwtDecode(savedToken);
         return decoded.role;
       } catch (e) {
+        // If token is invalid, remove it
+        localStorage.removeItem('authToken');
         return null;
       }
     }
     return null;
   });
 
-  // CHANGED: Refactored the login function to use the new api service
+  // Memoize the logout function to keep it stable
+  const logout = useCallback(() => {
+    setToken(null);
+    setUserRole(null);
+    localStorage.removeItem('authToken');
+  }, []);
+
+  // Create a memoized instance of the ApiService
+  const api = useMemo(() => new ApiService(logout), [logout]);
+
   const login = async (username, password) => {
     try {
+      // Use the new api service to log in
       const data = await api.post('/api/login', { username, password });
       
       const receivedToken = data.access_token;
@@ -41,12 +52,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
-    setToken(null);
-    setUserRole(null);
-    localStorage.removeItem('authToken');
-  };
-
+  // The context value now includes the api instance
   const value = {
     token,
     userRole,
@@ -54,11 +60,17 @@ export const AuthProvider = ({ children }) => {
     isAdmin: userRole === 'admin',
     login,
     logout,
+    api, // Provide the api service instance through the context
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
+// Custom hook to use the auth context
 export const useAuth = () => {
-  return useContext(AuthContext);
+  const context = useContext(AuthContext);
+  if (context === null) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 };

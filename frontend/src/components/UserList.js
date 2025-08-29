@@ -2,12 +2,11 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../utils/api';
 
 function UserList() {
   const [users, setUsers] = useState([]);
   const [message, setMessage] = useState('');
-  const { token } = useAuth();
+  const { token, api } = useAuth();
 
   const fetchUsers = useCallback(async () => {
     if (!token) return;
@@ -17,7 +16,7 @@ function UserList() {
     } catch (error) {
       setMessage(`Error fetching users: ${error.message}`);
     }
-  }, [token]);
+  }, [token, api]);
 
   useEffect(() => {
     fetchUsers();

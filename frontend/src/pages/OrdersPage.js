@@ -11,7 +11,7 @@ function OrdersPage() {
   const [days, setDays] = useState(7);
   const [statusMessage, setStatusMessage] = useState('');
   const [progress, setProgress] = useState({ value: 0, max: 100 });
-  const { token } = useAuth();
+  const { token, api } = useAuth();
   
   const [logoutMessage, setLogoutMessage] = useState('');
   
@@ -20,19 +20,11 @@ function OrdersPage() {
   const handleForceLogout = async () => {
     setLogoutMessage('Executing command...');
     try {
-      const response = await fetch('/api/amazon-logout', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      const data = await response.json();
-      if (response.ok) {
-        const fullMessage = `${data.message}\n\nOutput:\n${data.output || 'No output.'}`;
-        setLogoutMessage(fullMessage);
-      } else {
-        setLogoutMessage(`Error: ${data.error}\n\nDetails:\n${data.details || 'N/A'}`);
-      }
+      const data = await api.post('/api/amazon-logout', {}, token);
+      const fullMessage = `${data.message}\n\nOutput:\n${data.output || 'No output.'}`;
+      setLogoutMessage(fullMessage);
     } catch (error) {
-      setLogoutMessage('Failed to connect to the server.');
+      setLogoutMessage(`Error: ${error.message}`);
     }
   };
 

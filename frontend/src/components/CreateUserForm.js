@@ -2,14 +2,13 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { api } from '../utils/api';
 
 function CreateUserForm() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('user');
   const [message, setMessage] = useState('');
-  const { token } = useAuth();
+  const { token, api } = useAuth();
 
   const handleSubmit = async (event) => {
     event.preventDefault();
