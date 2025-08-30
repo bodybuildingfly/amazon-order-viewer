@@ -20,6 +20,7 @@ import hashlib
 import base64
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from db import init_pool, get_db_cursor
 
 # --- Flask App Initialization ---
@@ -117,90 +118,127 @@ def summarize_titles_bulk(titles, progress_start=0, progress_end=1):
 
     yield "status", f"Summarizing {len(unique_titles)} titles..."
 
+    MAX_SUMMARY_RETRIES = 3  # Initial attempt + 2 retries
     for i in range(num_batches):
         batch_start_index = i * batch_size
         batch_end_index = batch_start_index + batch_size
         batch_titles = unique_titles[batch_start_index:batch_end_index]
-
+        
         yield "sub_status", f"(Batch {i + 1} of {num_batches})"
+        
+        titles_to_process = list(batch_titles)
 
-        titles_json_string = json.dumps(batch_titles, indent=2)
+        for attempt in range(MAX_SUMMARY_RETRIES):
+            if not titles_to_process:
+                break
 
-        prompt = f"""
-        You are an expert product catalog summarizer. Your goal is to create a very short, human-readable summary for each product title provided in the input list. The summary must be strictly between 3 and 5 words.
+            titles_json_string = json.dumps(titles_to_process, indent=2)
 
-        **CRITICAL INSTRUCTIONS:**
-        1.  Your output MUST be a single, valid JSON object.
-        2.  The JSON object must have a key for EVERY product title from the input list.
-        3.  The value for each key must be the new, summarized title.
+            prompt = f"""
+            You are an expert product catalog summarizer. Your goal is to create a very short, human-readable summary for each product title provided in the input list. The summary must be strictly between 3 and 5 words.
 
-        **SUMMARIZATION RULES:**
-        1.  **Identify Core Product & Brand**: Find the brand (e.g., "Elmer's") and the main product (e.g., "Craft Glue").
-        2.  **Combine and Refine**: Combine them into a natural phrase (e.g., "Elmer's Craft Glue"). Add a key attribute if necessary (e.g., "Clear").
-        3.  **Strictly Exclude**: You MUST remove all of the following:
-            -   Sizes, weights, volumes (e.g., "4 oz", "1 Gallon")
-            -   Counts, packs (e.g., "2-pack")
-            -   Marketing claims (e.g., "Helps Moisture Soften and Nourish")
-            -   Model numbers or identifiers (e.g., "E431")
-            -   Superfluous descriptors (e.g., "for School Supplies")
+            **CRITICAL INSTRUCTIONS:**
+            1.  Your output MUST be a single, valid JSON object.
+            2.  The JSON object must have a key for EVERY product title from the input list.
+            3.  The value for each key must be the new, summarized title.
 
-        ---
-        **Examples**
+            **SUMMARIZATION RULES:**
+            1.  **Identify Core Product & Brand**: Find the brand (e.g., "Elmer's") and the main product (e.g., "Craft Glue").
+            2.  **Combine and Refine**: Combine them into a natural phrase (e.g., "Elmer's Craft Glue"). Add a key attribute if necessary (e.g., "Clear").
+            3.  **Strictly Exclude**: You MUST remove all of the following:
+                -   Sizes, weights, volumes (e.g., "4 oz", "1 Gallon")
+                -   Counts, packs (e.g., "2-pack")
+                -   Marketing claims (e.g., "Helps Moisture Soften and Nourish")
+                -   Model numbers or identifiers (e.g., "E431")
+                -   Superfluous descriptors (e.g., "for School Supplies")
 
-        **Input:**
-        [
-          "Oars + Alps Aluminum Free Deodorant for Men and Women, Dermatologist Tested and Made with Clean Ingredients, Travel Size, Variety, 3 Pack, 2.6 Oz Each",
-          "Elmer's E431 Craft Bond Fabric and Paper Glue, 4 oz, Clear"
-        ]
+            ---
+            **Examples**
 
-        **Output:**
-        {{
-          "Oars + Alps Aluminum Free Deodorant for Men and Women, Dermatologist Tested and Made with Clean Ingredients, Travel Size, Variety, 3 Pack, 2.6 Oz Each": "Oars + Alps Deodorant",
-          "Elmer's E431 Craft Bond Fabric and Paper Glue, 4 oz, Clear": "Elmer's Clear Craft Glue"
-        }}
-        ---
+            **Input:**
+            [
+              "Oars + Alps Aluminum Free Deodorant for Men and Women, Dermatologist Tested and Made with Clean Ingredients, Travel Size, Variety, 3 Pack, 2.6 Oz Each",
+              "Elmer's E431 Craft Bond Fabric and Paper Glue, 4 oz, Clear"
+            ]
 
-        **Titles to Summarize:**
-        {titles_json_string}
-        """
+            **Output:**
+            {{
+              "Oars + Alps Aluminum Free Deodorant for Men and Women, Dermatologist Tested and Made with Clean Ingredients, Travel Size, Variety, 3 Pack, 2.6 Oz Each": "Oars + Alps Deodorant",
+              "Elmer's E431 Craft Bond Fabric and Paper Glue, 4 oz, Clear": "Elmer's Clear Craft Glue"
+            }}
+            ---
 
-        payload = {
-            "model": model_name,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "format": "json"
-        }
-        headers = { "Authorization": f"Bearer {api_key}", "Content-Type": "application/json" } if api_key else {}
+            **Titles to Summarize:**
+            {titles_json_string}
+            """
 
-        app.logger.info(f"Starting Ollama summarization for batch {i+1}/{num_batches} to {ollama_url}...")
+            payload = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "format": "json"
+            }
+            headers = { "Authorization": f"Bearer {api_key}", "Content-Type": "application/json" } if api_key else {}
 
-        try:
-            response = requests.post(ollama_url, json=payload, headers=headers, timeout=60)
-            response.raise_for_status()
-            response_data = response.json()
-            
-            if response_data.get("message"):
-                # With format: "json", the content should be a valid JSON string already.
-                content = response_data.get("message", {}).get("content", "")
-                batch_summaries = json.loads(content)
-                all_summaries.update(batch_summaries)
-            
-        except requests.exceptions.Timeout:
-            app.logger.error(f"Connection to Ollama timed out for batch {i+1}.")
-            yield "error", f"AI summarization timed out on batch {i+1}. Some titles may not be summarized."
-            continue
-        except requests.exceptions.ConnectionError as e:
-            app.logger.error(f"Could not connect to Ollama for batch {i+1}: {e}")
-            yield "error", "Could not connect to the AI summarization service."
-            return all_summaries
-        except json.JSONDecodeError:
-            app.logger.exception(f"Failed to decode JSON from AI response for batch {i+1}.")
-            yield "error", f"AI service returned an invalid response for batch {i+1}."
-            continue
-        except Exception:
-            app.logger.exception(f"An unexpected error occurred during summarization for batch {i+1}.")
-            yield "error", "An unexpected error occurred during summarization."
-            continue
+            app.logger.info(f"Starting Ollama summarization for batch {i+1}/{num_batches} (Attempt {attempt + 1}) to {ollama_url}...")
+
+            try:
+                response = requests.post(ollama_url, json=payload, headers=headers, timeout=60)
+                response.raise_for_status()
+                response_data = response.json()
+                
+                batch_summaries = {}
+                if response_data.get("message"):
+                    content = response_data.get("message", {}).get("content", "")
+                    batch_summaries = json.loads(content)
+
+                failed_titles = []
+                for title in titles_to_process:
+                    summary = batch_summaries.get(title)
+                    if not summary or len(summary.split()) > 5:
+                        failed_titles.append(title)
+                    else:
+                        all_summaries[title] = summary
+                
+                if not failed_titles:
+                    break  # All titles in this batch succeeded
+                
+                titles_to_process = failed_titles
+                app.logger.warning(f"Summarization failed validation for {len(titles_to_process)} titles on attempt {attempt + 1}. Retrying them.")
+                if attempt == MAX_SUMMARY_RETRIES - 1:
+                    app.logger.error(f"Using original title as fallback for {len(titles_to_process)} titles after all retries.")
+                    for title in titles_to_process:
+                        all_summaries[title] = title
+
+            except requests.exceptions.Timeout:
+                app.logger.error(f"Connection to Ollama timed out for batch {i+1}.")
+                yield "error", f"AI summarization timed out on batch {i+1}. Some titles may not be summarized."
+                if attempt == MAX_SUMMARY_RETRIES - 1:
+                    app.logger.error(f"Using original title as fallback for {len(titles_to_process)} titles after timeout on last retry.")
+                    for title in titles_to_process:
+                        all_summaries[title] = title
+                continue
+            except requests.exceptions.ConnectionError as e:
+                app.logger.error(f"Could not connect to Ollama for batch {i+1}: {e}")
+                yield "error", "Could not connect to the AI summarization service."
+                # Don't retry on connection error, just fail the whole process
+                return all_summaries
+            except json.JSONDecodeError:
+                app.logger.exception(f"Failed to decode JSON from AI response for batch {i+1}.")
+                yield "error", f"AI service returned an invalid response for batch {i+1}."
+                if attempt == MAX_SUMMARY_RETRIES - 1:
+                    app.logger.error(f"Using original title as fallback for {len(titles_to_process)} titles after JSON error on last retry.")
+                    for title in titles_to_process:
+                        all_summaries[title] = title
+                continue
+            except Exception:
+                app.logger.exception(f"An unexpected error occurred during summarization for batch {i+1}.")
+                yield "error", "An unexpected error occurred during summarization."
+                if attempt == MAX_SUMMARY_RETRIES - 1:
+                    app.logger.error(f"Using original title as fallback for {len(titles_to_process)} titles after unexpected error on last retry.")
+                    for title in titles_to_process:
+                        all_summaries[title] = title
+                continue
         
         progress_fraction = (i + 1) / num_batches
         current_progress = progress_start + (progress_fraction * progress_range)
@@ -296,36 +334,57 @@ def get_orders_and_transactions():
             all_order_details = []
             all_titles_to_summarize = []
             processed_orders = 0
-            MAX_RETRIES = 3
-            RETRY_DELAY = 2  # seconds
+            MAX_CONCURRENT_REQUESTS = 5
 
-            for order_num in order_numbers:
-                processed_orders += 1
-                yield from send_event("status", f"Fetching details for order {processed_orders} of {total_orders}...")
-                
-                success = False
+            def fetch_order_with_retries(order_num_to_fetch):
+                """
+                Fetches a single order with retry logic.
+                Returns the order details object on success, or the exception on failure.
+                """
+                MAX_RETRIES = 3
+                RETRY_DELAY = 2  # seconds
                 for attempt in range(MAX_RETRIES):
                     try:
-                        order_details = amazon_orders.get_order(order_id=order_num)
-                        if order_details:
+                        return amazon_orders.get_order(order_id=order_num_to_fetch)
+                    except (requests.exceptions.RequestException, AmazonOrdersError) as e:
+                        app.logger.warning(f"Attempt {attempt + 1} for order {order_num_to_fetch} failed: {e}")
+                        if attempt < MAX_RETRIES - 1:
+                            time.sleep(RETRY_DELAY * (2 ** attempt))
+                        else:
+                            app.logger.error(f"All retries failed for order {order_num_to_fetch}.")
+                            return e
+
+            yield from send_event("status", f"Fetching details for {total_orders} orders concurrently...")
+
+            with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS) as executor:
+                future_to_order_num = {
+                    executor.submit(fetch_order_with_retries, order_num): order_num
+                    for order_num in order_numbers
+                }
+
+                for future in as_completed(future_to_order_num):
+                    processed_orders += 1
+                    order_num = future_to_order_num[future]
+                    
+                    try:
+                        order_details = future.result()
+
+                        if isinstance(order_details, Exception):
+                            app.logger.error(f"Failed to fetch order {order_num} after retries: {order_details}")
+                            yield from send_event("status", f"Failed to fetch details for order {order_num}. Skipping.")
+                        elif order_details:
                             all_order_details.append(order_details)
                             if order_details.items:
                                 for item in order_details.items:
                                     all_titles_to_summarize.append(item.title)
-                        success = True
-                        break  # Success, exit the retry loop
-                    except (requests.exceptions.RequestException, AmazonOrdersError) as e:
-                        app.logger.warning(f"Attempt {attempt + 1} failed for order {order_num}: {e}")
-                        if attempt < MAX_RETRIES - 1:
-                            delay = RETRY_DELAY * (2 ** attempt)
-                            yield from send_event("status", f"Failed to fetch order {order_num}. Retrying in {delay}s...")
-                            time.sleep(delay)
                         else:
-                            app.logger.error(f"Failed to fetch details for order {order_num} after {MAX_RETRIES} attempts. Skipping.")
-                            yield from send_event("status", f"Failed to fetch details for order {order_num}. Skipping.")
-                
-                # Always update progress, regardless of success or failure
-                yield from send_event("progress_update", processed_orders)
+                            app.logger.warning(f"Received no details for order {order_num}, it may have no items.")
+
+                    except Exception as e:
+                        app.logger.exception(f"An unexpected error occurred while processing future for order {order_num}.")
+                        yield from send_event("status", f"Error processing order {order_num}: {e}. Skipping.")
+
+                    yield from send_event("progress_update", processed_orders)
 
             summaries_map = {}
             if summarize:
