@@ -333,8 +333,6 @@ def get_orders_and_transactions():
             yield from send_event("progress_max", progress_max)
             yield from send_event("status", f"Found {total_orders} unique orders to process.")
 
-            all_order_details = []
-            all_titles_to_summarize = []
             processed_orders = 0
             MAX_CONCURRENT_REQUESTS = 5
 
@@ -356,7 +354,7 @@ def get_orders_and_transactions():
                             app.logger.error(f"All retries failed for order {order_num_to_fetch}.")
                             return e
 
-            yield from send_event("status", f"Fetching details for {total_orders} orders concurrently...")
+            yield from send_event("status", f"Fetching and processing {total_orders} orders...")
 
             with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_REQUESTS) as executor:
                 future_to_order_num = {
@@ -365,7 +363,6 @@ def get_orders_and_transactions():
                 }
 
                 for future in as_completed(future_to_order_num):
-                    processed_orders += 1
                     order_num = future_to_order_num[future]
                     
                     try:
@@ -374,83 +371,73 @@ def get_orders_and_transactions():
                         if isinstance(order_details, Exception):
                             app.logger.error(f"Failed to fetch order {order_num} after retries: {order_details}")
                             yield from send_event("status", f"Failed to fetch details for order {order_num}. Skipping.")
-                        elif order_details:
-                            all_order_details.append(order_details)
-                            if order_details.items:
-                                for item in order_details.items:
-                                    all_titles_to_summarize.append(item.title)
-                        else:
-                            app.logger.warning(f"Received no details for order {order_num}, it may have no items.")
+                            continue
+
+                        if not order_details or not order_details.items:
+                            app.logger.warning(f"Received no details or items for order {order_num}, skipping.")
+                            continue
+
+                        summaries_map = {}
+                        if summarize:
+                            titles_to_summarize = [item.title for item in order_details.items]
+                            if titles_to_summarize:
+                                yield from send_event("sub_status", f"Order {order_num}: Summarizing titles...")
+                                summarizer = summarize_titles_bulk(titles=titles_to_summarize)
+                                while True:
+                                    try:
+                                        event_type, data = next(summarizer)
+                                        if event_type == "error":
+                                            yield from send_event("error", data)
+                                    except StopIteration as e:
+                                        summaries_map = e.value
+                                        break
+                                yield from send_event("sub_status", "")
+
+                        discount_text = None
+                        if order_details.subscription_discount is not None:
+                            try:
+                                discount_amount = float(order_details.subscription_discount)
+                                discount_text = f"Subscribe & Save discount: ${discount_amount:.2f}"
+                            except (ValueError, TypeError):
+                                discount_text = order_details.subscription_discount
+
+                        order_data = {
+                            "order_number": order_details.order_number,
+                            "order_placed_date": order_details.order_placed_date.isoformat() if order_details.order_placed_date else None,
+                            "grand_total": f"${order_details.grand_total:.2f}" if order_details.grand_total is not None else None,
+                            "subscription_discount": discount_text,
+                            "recipient": order_details.recipient.name if order_details.recipient else None,
+                            "items": []
+                        }
+
+                        for item in order_details.items:
+                            summary = summaries_map.get(item.title, item.title)
+                            full_link = item.link
+                            if full_link and not full_link.startswith('http'):
+                                full_link = f"https://www.amazon.com{full_link}"
+                            
+                            order_data["items"].append({
+                                "title": summary,
+                                "link": full_link,
+                                "price": f"${item.price:.2f}" if item.price is not None else None,
+                                "quantity": item.quantity if item.quantity is not None else 1
+                            })
+                        
+                        yield from send_event("order_data", order_data)
 
                     except Exception as e:
                         app.logger.exception(f"An unexpected error occurred while processing future for order {order_num}.")
                         yield from send_event("status", f"Error processing order {order_num}: {e}. Skipping.")
-
-                    yield from send_event("progress_update", processed_orders)
-
-            summaries_map = {}
-            if summarize:
-                summarizer = summarize_titles_bulk(
-                    titles=all_titles_to_summarize,
-                    progress_start=processed_orders,
-                    progress_end=progress_max
-                )
-                while True:
-                    try:
-                        event_type, data = next(summarizer)
-                        yield from send_event(event_type, data)
-                    except StopIteration as e:
-                        summaries_map = e.value
-                        break
-            else:
+                    finally:
+                        processed_orders += 1
+                        yield from send_event("progress_update", processed_orders)
+            
+            if not summarize:
                 yield from send_event("status", "Skipping title summarization.")
-                # Ensure the progress bar completes if we skip summarization
                 if progress_max > processed_orders:
                     yield from send_event("progress_update", progress_max)
-            
-            yield from send_event("status", "Finalizing order data...")
 
-            combined_data = []
-            for order_details in all_order_details:
-                if order_details.items:
-                    
-                    discount_text = None
-                    if order_details.subscription_discount is not None:
-                        try:
-                            discount_amount = float(order_details.subscription_discount)
-                            discount_text = f"Subscribe & Save discount: ${discount_amount:.2f}"
-                        except (ValueError, TypeError):
-                            discount_text = order_details.subscription_discount
-
-                    order_data = {
-                        "order_number": order_details.order_number,
-                        "order_placed_date": order_details.order_placed_date.isoformat() if order_details.order_placed_date else None,
-                        "grand_total": f"${order_details.grand_total:.2f}" if order_details.grand_total is not None else None,
-                        "subscription_discount": discount_text,
-                        "recipient": order_details.recipient.name if order_details.recipient else None,
-                        "items": []
-                    }
-
-                    for item in order_details.items:
-                        summary = summaries_map.get(item.title, item.title)
-                        
-                        full_link = item.link
-                        if full_link and not full_link.startswith('http'):
-                            full_link = f"[https://www.amazon.com](https://www.amazon.com){full_link}"
-                        
-                        order_data["items"].append({
-                            "title": summary,
-                            "link": full_link,
-                            "price": f"${item.price:.2f}" if item.price is not None else None,
-                            "quantity": item.quantity if item.quantity is not None else 1
-                        })
-                    
-                    combined_data.append(order_data)
-            
-            app.logger.info("Sorting orders by date...")
-            combined_data.sort(key=lambda x: x.get('order_placed_date'), reverse=True)
-
-            yield from send_event("data", combined_data)
+            app.logger.info("Finished processing all orders.")
             yield from send_event("status", "Done.")
 
         except Exception as e:

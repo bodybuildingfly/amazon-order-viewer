@@ -31,6 +31,7 @@ export const AuthProvider = ({ children }) => {
   const [subStatusMessage, setSubStatusMessage] = useState('');
   const [progress, setProgress] = useState({ value: 0, max: 100 });
   const eventSourceRef = useRef(null);
+  const incomingOrdersRef = useRef([]);
 
   // --- Existing Auth Functions ---
   const logout = useCallback(() => {
@@ -68,6 +69,7 @@ export const AuthProvider = ({ children }) => {
     setError('');
     setIsLoading(true);
     setOrders([]);
+    incomingOrdersRef.current = []; // Reset the buffer
     setStatusMessage('Connecting to the server...');
     setSubStatusMessage('');
     setProgress({ value: 0, max: 100 });
@@ -93,6 +95,13 @@ export const AuthProvider = ({ children }) => {
         case 'status':
           setStatusMessage(payload);
           if (payload === 'Done.') {
+            // Sort the collected orders
+            const sortedOrders = [...incomingOrdersRef.current].sort((a, b) => 
+              new Date(b.order_placed_date) - new Date(a.order_placed_date)
+            );
+            // Set the final state
+            setOrders(sortedOrders);
+
             setIsLoading(false);
             setSubStatusMessage('');
             eventSource.close();
@@ -107,7 +116,11 @@ export const AuthProvider = ({ children }) => {
         case 'progress_update':
           setProgress(prev => ({ ...prev, value: payload }));
           break;
-        case 'data':
+        case 'order_data':
+          // Push to the temporary buffer instead of setting state
+          incomingOrdersRef.current.push(payload);
+          break;
+        case 'data': // Keep for backward compatibility or other uses
           setOrders(payload);
           break;
         case 'error':
