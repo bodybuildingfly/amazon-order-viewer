@@ -14,10 +14,12 @@ from cryptography.fernet import Fernet
 from amazonorders.session import AmazonSession
 from amazonorders.orders import AmazonOrders
 from amazonorders.transactions import AmazonTransactions
+from amazonorders.exception import AmazonOrdersError
 import requests
 import hashlib
 import base64
 import subprocess
+import time
 from db import init_pool, get_db_cursor
 
 # --- Flask App Initialization ---
@@ -294,15 +296,35 @@ def get_orders_and_transactions():
             all_order_details = []
             all_titles_to_summarize = []
             processed_orders = 0
+            MAX_RETRIES = 3
+            RETRY_DELAY = 2  # seconds
+
             for order_num in order_numbers:
                 processed_orders += 1
                 yield from send_event("status", f"Fetching details for order {processed_orders} of {total_orders}...")
-                order_details = amazon_orders.get_order(order_id=order_num)
-                if order_details:
-                    all_order_details.append(order_details)
-                    if order_details.items:
-                        for item in order_details.items:
-                            all_titles_to_summarize.append(item.title)
+                
+                success = False
+                for attempt in range(MAX_RETRIES):
+                    try:
+                        order_details = amazon_orders.get_order(order_id=order_num)
+                        if order_details:
+                            all_order_details.append(order_details)
+                            if order_details.items:
+                                for item in order_details.items:
+                                    all_titles_to_summarize.append(item.title)
+                        success = True
+                        break  # Success, exit the retry loop
+                    except (requests.exceptions.RequestException, AmazonOrdersError) as e:
+                        app.logger.warning(f"Attempt {attempt + 1} failed for order {order_num}: {e}")
+                        if attempt < MAX_RETRIES - 1:
+                            delay = RETRY_DELAY * (2 ** attempt)
+                            yield from send_event("status", f"Failed to fetch order {order_num}. Retrying in {delay}s...")
+                            time.sleep(delay)
+                        else:
+                            app.logger.error(f"Failed to fetch details for order {order_num} after {MAX_RETRIES} attempts. Skipping.")
+                            yield from send_event("status", f"Failed to fetch details for order {order_num}. Skipping.")
+                
+                # Always update progress, regardless of success or failure
                 yield from send_event("progress_update", processed_orders)
 
             summaries_map = {}
