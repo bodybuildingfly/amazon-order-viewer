@@ -67,4 +67,4 @@ COPY --from=builder /app/frontend/build ./build
 EXPOSE 5001
 
 # The command to run the application using a production-grade Gunicorn server
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "4", "--worker-class", "gevent", "--timeout", "120", "app:app"]
